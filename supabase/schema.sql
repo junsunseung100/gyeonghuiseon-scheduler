@@ -1,3 +1,11 @@
+-- 기존 테이블 정리 (재실행 안전)
+drop table if exists tasks cascade;
+drop table if exists prescriptions cascade;
+drop table if exists blocks cascade;
+drop table if exists patients cascade;
+drop table if exists settings cascade;
+
+-- 테이블 생성
 create table patients (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -41,3 +49,16 @@ create table settings (
 );
 
 insert into settings (id) values (1) on conflict do nothing;
+
+-- 보안(RLS): 로그인한 사용자(원장·간호사)만 접근
+alter table patients enable row level security;
+alter table blocks enable row level security;
+alter table prescriptions enable row level security;
+alter table tasks enable row level security;
+alter table settings enable row level security;
+
+create policy "authenticated all" on patients for all to authenticated using (true) with check (true);
+create policy "authenticated all" on blocks for all to authenticated using (true) with check (true);
+create policy "authenticated all" on prescriptions for all to authenticated using (true) with check (true);
+create policy "authenticated all" on tasks for all to authenticated using (true) with check (true);
+create policy "authenticated all" on settings for all to authenticated using (true) with check (true);
