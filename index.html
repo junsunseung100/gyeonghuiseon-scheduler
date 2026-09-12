@@ -1,13 +1,45 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>gyeonghuiseon-scheduler</title>
+    <title>경희선한의원 · 문진일정 달력</title>
+    <style>
+      :root { --blue:#2b6cb0; --green:#2f855a; --brown:#8a6d3b; --red:#c53030; --gold:#b7791f; --purple:#6b46c1; --line:#e2e8f0; }
+      * { box-sizing: border-box; }
+      body { margin:0; font-family: system-ui, "Malgun Gothic", sans-serif; color:#1a202c; background:#f7fafc; }
+      header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:#fff; border-bottom:1px solid var(--line); }
+      header h1 { font-size:16px; margin:0; }
+      #userbar { margin-left:auto; font-size:13px; color:#4a5568; display:flex; gap:8px; align-items:center; }
+      nav#tabs { display:flex; gap:4px; padding:8px 16px; background:#fff; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+      nav#tabs button { border:1px solid var(--line); background:#fff; padding:6px 12px; border-radius:8px; cursor:pointer; font-size:14px; }
+      nav#tabs button.active { background:#1a202c; color:#fff; border-color:#1a202c; }
+      main#view { padding:16px; max-width:1000px; }
+      button { font-family:inherit; }
+      .btn { border:1px solid var(--line); background:#fff; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:12px; margin:2px 2px 2px 0; }
+      .btn.primary { background:var(--green); color:#fff; border-color:var(--green); }
+      .card { border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:10px; background:#fff; }
+      .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+      input, select { font-family:inherit; font-size:14px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
+      .chip { display:inline-block; font-size:11px; padding:1px 6px; border-radius:6px; color:#fff; margin:1px; }
+      table.cal { width:100%; border-collapse:collapse; }
+      table.cal th { font-size:12px; color:#718096; padding:4px; }
+      table.cal td { border:1px solid var(--line); vertical-align:top; height:78px; width:14.2%; padding:3px; font-size:12px; }
+      td.closed { background:#f1f1f4; }
+      td.today { outline:2px solid var(--blue); }
+      .daynum { font-weight:600; font-size:12px; }
+      .holiday { color:var(--red); font-size:10px; }
+      .badge { font-size:10px; background:#edf2f7; border-radius:4px; padding:0 4px; margin-left:4px; }
+      .muted { color:#718096; font-size:12px; }
+      .task { border:1px solid var(--line); border-radius:8px; padding:8px; margin-bottom:6px; }
+      .task.overdue { border-color:var(--red); }
+      h3 { margin:16px 0 8px; font-size:15px; }
+      label.field { display:flex; flex-direction:column; gap:4px; font-size:12px; color:#4a5568; }
+      #login { max-width:340px; margin:60px auto; }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="root"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
