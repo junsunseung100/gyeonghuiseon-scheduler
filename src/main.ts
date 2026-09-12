@@ -21,12 +21,13 @@ interface State {
   tab: string
   year: number
   month: number // 0-11
+  pickDate: string // 달력에서 클릭한 날짜
 }
 const now = new Date()
 const state: State = {
   user: null, patients: [], blocks: [], prescriptions: [], tasks: [],
   settings: { weekly_closed: [0, 4], holidays: [], no_delivery: [] },
-  tab: 'calendar', year: now.getFullYear(), month: now.getMonth(),
+  tab: 'calendar', year: now.getFullYear(), month: now.getMonth(), pickDate: '',
 }
 
 const COLOR: Record<string, string> = {
@@ -95,7 +96,8 @@ function render(): void {
       <div id="userbar"><span>${state.user.email ?? ''}</span><button class="btn" data-action="logout">로그아웃</button></div>
     </header>
     <nav id="tabs">${TABS.map(([k, t]) => `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${t}</button>`).join('')}</nav>
-    <main id="view"></main>`
+    <main id="view"></main>
+    <div id="modal"></div>`
   const view = root.querySelector('#view') as HTMLElement
   if (state.tab === 'calendar') renderCalendar(view)
   else if (state.tab === 'today') renderToday(view)
@@ -116,12 +118,18 @@ function renderCalendar(view: HTMLElement): void {
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소')
-    const chips = dayTasks.map((t) => `<span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.label}</span>`).join('')
+    // 같은 처방의 처방+문자가 같은 날이면 한 줄로 합침: "김나나 6-1 처방 문자"
+    const shown = dayTasks.filter((t) => !(t.kind === '문자' && dayTasks.some((o) => o.kind === '처방' && o.prescription_id === t.prescription_id)))
+    const chips = shown.map((t) => {
+      let label = t.label
+      if (t.kind === '처방' && dayTasks.some((o) => o.kind === '문자' && o.prescription_id === t.prescription_id)) label = `${t.label} 문자`
+      return `<span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${label}</span>`
+    }).join('')
     const closed = isClinicClosed(ds, state.settings)
     const hol = isHoliday(ds, state.settings)
     const noDel = state.settings.no_delivery.includes(ds)
-    const count = dayTasks.length > 5 ? `<span class="cellcount">${dayTasks.length}건 · 스크롤 ↕</span>` : ''
-    cells.push(`<td class="${closed ? 'closed' : ''} ${ds === todayStr() ? 'today' : ''}">
+    const count = shown.length > 6 ? `<span class="cellcount">${shown.length}건 · 스크롤 ↕</span>` : ''
+    cells.push(`<td class="${closed ? 'closed' : ''} ${ds === todayStr() ? 'today' : ''}" data-action="pickDay" data-date="${ds}">
       <div class="daynum">${d}${hol ? ' <span class="holiday">공휴일</span>' : ''}${noDel ? ' <span class="holiday">택배불가</span>' : ''} ${count}</div>
       <div class="cellbox">${chips}</div></td>`)
   }
@@ -238,6 +246,48 @@ function renderSettings(view: HTMLElement): void {
       <div class="row"><input type="date" id="nodDate"><button class="btn primary" data-action="addNoDel">추가</button></div></div>`
 }
 
+// ---------- 처방 생성 공통 ----------
+async function createRx(p: Patient, blk: Block, date: string): Promise<void> {
+  const inb = rxInBlock(blk.id)
+  const y = inb.length + 1
+  const overall = state.prescriptions.filter((r) => r.patient_id === p.id).length + 1
+  const rx = await insertPrescription({ block_id: blk.id, patient_id: p.id, y, overall, prescribed_on: date })
+  await insertTasks(buildTasksForPrescription(p, rx, blk.x, state.settings))
+}
+async function registerPatient(name: string, region: Region, months: 1 | 2 | 3): Promise<{ p: Patient; blk: Block }> {
+  const p = await insertPatient({ name, region })
+  const blk = await insertBlock({ patient_id: p.id, months, x: months * 2 })
+  return { p, blk }
+}
+
+// ---------- 날짜 클릭 팝업 ----------
+function openDayModal(ds: string): void {
+  state.pickDate = ds
+  const modal = document.getElementById('modal') as HTMLElement
+  const opts = state.patients.map((p) => `<option value="${p.id}">${p.name}${p.region !== '서울' ? ` (${p.region})` : ''}</option>`).join('')
+  modal.className = 'open'
+  modal.innerHTML = `<div class="modal-box">
+    <h3>${ds} — 처방 입력</h3>
+    ${state.patients.length
+      ? `<div class="row"><select id="m-pat">${opts}</select><button class="btn primary" data-action="rxForDay">이 날 처방 나감</button></div>`
+      : '<p class="muted">등록된 환자가 없습니다. 아래에서 새로 등록하세요.</p>'}
+    <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
+    <b>새 환자 등록하고 이 날 처방</b>
+    <div class="row" style="margin-top:6px">
+      <input id="m-name" placeholder="이름 (예: 김나나)">
+      <select id="m-region"><option>서울</option><option>지방</option><option>해외</option></select>
+      <select id="m-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn primary" data-action="registerAndRx">등록하고 처방</button>
+      <button class="btn" data-action="closeModal">닫기</button>
+    </div></div>`
+}
+function closeModal(): void {
+  const modal = document.getElementById('modal') as HTMLElement
+  modal.className = ''; modal.innerHTML = ''
+}
+
 // ---------- 액션 ----------
 async function handleClick(e: Event): Promise<void> {
   const el = (e.target as HTMLElement).closest('[data-action],[data-tab]') as HTMLElement | null
@@ -251,6 +301,30 @@ async function handleClick(e: Event): Promise<void> {
   if (action === 'logout') { await signOut(); return }
   if (action === 'prevMonth') { state.month--; if (state.month < 0) { state.month = 11; state.year-- } render(); return }
   if (action === 'nextMonth') { state.month++; if (state.month > 11) { state.month = 0; state.year++ } render(); return }
+
+  // 달력 날짜 클릭 → 팝업
+  if (action === 'pickDay') { openDayModal(el.getAttribute('data-date')!); return }
+  if (action === 'closeModal') { closeModal(); return }
+  if (action === 'rxForDay') {
+    const pid = (document.getElementById('m-pat') as HTMLSelectElement).value
+    const p = patientById(pid)!
+    const blk = latestBlock(pid)
+    if (!blk) { alert('이 환자는 결제(개월수)가 없습니다. 환자 탭에서 새 결제를 추가하세요.'); return }
+    if (rxInBlock(blk.id).length >= blk.x) { alert('이 결제분을 다 채웠습니다. 환자 탭에서 "새 결제 추가"를 먼저 하세요.'); return }
+    const warn = saturdayWarning(p, state.pickDate)
+    if (warn && !confirm(warn + '\n그래도 진행할까요?')) return
+    await createRx(p, blk, state.pickDate); closeModal(); await reload(); return
+  }
+  if (action === 'registerAndRx') {
+    const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
+    if (!name) { alert('이름을 입력하세요'); return }
+    const region = (document.getElementById('m-region') as HTMLSelectElement).value as Region
+    const months = Number((document.getElementById('m-months') as HTMLSelectElement).value) as 1 | 2 | 3
+    const { p, blk } = await registerPatient(name, region, months)
+    const warn = saturdayWarning(p, state.pickDate)
+    if (warn && !confirm(warn + '\n그래도 진행할까요?')) { closeModal(); await reload(); return }
+    await createRx(p, blk, state.pickDate); closeModal(); await reload(); return
+  }
 
   if (action === 'addPatient') {
     const name = (document.getElementById('np-name') as HTMLInputElement).value.trim()

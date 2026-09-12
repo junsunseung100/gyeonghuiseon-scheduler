@@ -24,11 +24,12 @@
       .chip { display:inline-block; font-size:11px; padding:1px 6px; border-radius:6px; color:#fff; margin:1px; }
       table.cal { width:100%; border-collapse:collapse; table-layout:fixed; }
       table.cal th { font-size:12px; color:#718096; padding:4px; }
-      table.cal td { border:1px solid var(--line); vertical-align:top; height:150px; width:14.2%; padding:3px; font-size:12px; }
+      table.cal td { border:1px solid var(--line); vertical-align:top; height:184px; width:14.2%; padding:3px; font-size:12px; cursor:pointer; }
+      table.cal td:hover { background:#eef6ff; }
       td.closed { background:#f1f1f4; }
       td.today { outline:2px solid var(--blue); }
       .daynum { font-weight:700; font-size:13px; margin-bottom:2px; }
-      .cellbox { max-height:124px; overflow-y:auto; }
+      .cellbox { max-height:150px; overflow-y:auto; }
       .cellbox::-webkit-scrollbar { width:6px; }
       .cellbox::-webkit-scrollbar-thumb { background:#cbd5e0; border-radius:3px; }
       table.cal .chip { display:block; font-size:12px; font-weight:600; padding:2px 6px; margin:2px 0; white-space:normal; word-break:break-all; line-height:1.25; }
@@ -41,6 +42,10 @@
       h3 { margin:16px 0 8px; font-size:15px; }
       label.field { display:flex; flex-direction:column; gap:4px; font-size:12px; color:#4a5568; }
       #login { max-width:340px; margin:60px auto; }
+      #modal { position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:50; }
+      #modal.open { display:flex; }
+      .modal-box { background:#fff; border-radius:12px; padding:18px; width:360px; max-width:92vw; }
+      .modal-box h3 { margin:0 0 10px; }
     </style>
   </head>
   <body>
