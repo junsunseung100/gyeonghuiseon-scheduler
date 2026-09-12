@@ -4,7 +4,7 @@ import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
-  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade,
+  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
@@ -58,6 +58,19 @@ function suggestNumber(pid: string): string {
   return `${blk.x}-${rxInBlock(blk.id).length + 1}`
 }
 
+// ---------- 되돌리기(Undo) ----------
+const undoStack: Array<() => Promise<void>> = []
+function pushUndo(fn: () => Promise<void>): void {
+  undoStack.push(fn)
+  if (undoStack.length > 30) undoStack.shift()
+}
+async function doUndo(): Promise<void> {
+  const fn = undoStack.pop()
+  if (!fn) { alert('되돌릴 게 없습니다.'); return }
+  await fn()
+  await reload()
+}
+
 // ---------- 데이터 로드 ----------
 async function reload(): Promise<void> {
   const [data, s] = await Promise.all([loadAll(), loadSettings()])
@@ -100,7 +113,7 @@ function render(): void {
   root.innerHTML = `
     <header>
       <h1>경희선한의원 · 문진일정 달력</h1>
-      <div id="userbar"><span>${state.user.email ?? ''}</span><button class="btn" data-action="logout">로그아웃</button></div>
+      <div id="userbar"><span>${state.user.email ?? ''}</span><button class="btn" data-action="undo" title="삭제 되돌리기 (Ctrl+Z)">되돌리기</button><button class="btn" data-action="logout">로그아웃</button></div>
     </header>
     <nav id="tabs">${TABS.map(([k, t]) => `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${t}</button>`).join('')}</nav>
     <main id="view"></main>
@@ -425,7 +438,19 @@ async function handleClick(e: Event): Promise<void> {
   }
   if (action === 'delPatient') {
     const p = patientById(id)
-    if (p && confirm(`${p.name} 환자와 관련된 모든 일정을 지울까요?`)) { await deletePatient(id); await reload() }
+    if (p && confirm(`${displayName(p)} 환자와 관련된 모든 일정을 지울까요? (Ctrl+Z로 되돌릴 수 있음)`)) {
+      const blks = state.blocks.filter((b) => b.patient_id === id)
+      const rxs = state.prescriptions.filter((r) => r.patient_id === id)
+      const tks = state.tasks.filter((x) => x.patient_id === id)
+      const snap = p
+      pushUndo(async () => {
+        await insertRaw('patients', [snap as unknown as Record<string, unknown>])
+        await insertRaw('blocks', blks as unknown as Record<string, unknown>[])
+        await insertRaw('prescriptions', rxs as unknown as Record<string, unknown>[])
+        await insertRaw('tasks', tks as unknown as Record<string, unknown>[])
+      })
+      await deletePatient(id); await reload()
+    }
     return
   }
   if (action === 'addRx') {
@@ -445,13 +470,23 @@ async function handleClick(e: Event): Promise<void> {
   }
 
   if (action === 'delRx') {
-    if (confirm('이 회차의 처방·문자·확인전화·문진 등을 모두 지울까요?')) { await deletePrescriptionCascade(id); closeModal(); await reload() }
+    if (confirm('이 회차의 처방·문자·확인전화·문진 등을 모두 지울까요? (Ctrl+Z로 되돌릴 수 있음)')) {
+      const rx = state.prescriptions.find((r) => r.id === id)
+      const rxTasks = state.tasks.filter((x) => x.prescription_id === id)
+      pushUndo(async () => { if (rx) await insertRaw('prescriptions', [rx as unknown as Record<string, unknown>]); await insertRaw('tasks', rxTasks as unknown as Record<string, unknown>[]) })
+      await deletePrescriptionCascade(id); closeModal(); await reload()
+    }
     return
   }
   if (action === 'delTask') {
-    if (t && confirm('이 항목을 지울까요?')) { await deleteTask(t.id); closeModal(); await reload() }
+    if (t && confirm('이 항목을 지울까요? (Ctrl+Z로 되돌릴 수 있음)')) {
+      const snap = t
+      pushUndo(async () => { await insertRaw('tasks', [snap as unknown as Record<string, unknown>]) })
+      await deleteTask(t.id); closeModal(); await reload()
+    }
     return
   }
+  if (action === 'undo') { await doUndo(); return }
 
   if (!t) return
   if (action === 'done') { await updateTask(t.id, { status: '완료' }); await reload(); return }
@@ -511,6 +546,12 @@ async function handleClick(e: Event): Promise<void> {
 
 // ---------- 시작 ----------
 document.getElementById('root')!.addEventListener('click', (e) => { void handleClick(e) })
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target as HTMLElement).tagName
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+    e.preventDefault(); void doUndo()
+  }
+})
 onAuth(async (user) => {
   state.user = user
   if (user) await reload()

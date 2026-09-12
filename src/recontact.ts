@@ -4,7 +4,8 @@ import { addDays } from './dates'
 export function buildRecontact(prev: Task, todayAttempt: number): Omit<Task, 'id'> {
   const gap = todayAttempt === 1 ? 3 : 10
   const note = todayAttempt >= 2 ? '원장에게 얘기하기' : ''
-  const label = prev.label.replace(/(문진예정|재연락)/, '재연락')
+  const base = prev.label.replace(/\s*(문진예정|재연락).*$/, '') // "김나나 2-2"
+  const label = `${base} 재연락 ${todayAttempt}회차`
   return {
     patient_id: prev.patient_id,
     prescription_id: prev.prescription_id,

@@ -92,3 +92,9 @@ export async function deletePrescriptionCascade(prescriptionId: string): Promise
   await sb.from('tasks').delete().eq('prescription_id', prescriptionId)
   await sb.from('prescriptions').delete().eq('id', prescriptionId)
 }
+// 되돌리기용: 지운 행을 원래 id 그대로 다시 넣는다
+export async function insertRaw(table: string, rows: Record<string, unknown>[]): Promise<void> {
+  if (!rows.length) return
+  const { error } = await sb.from(table).insert(rows)
+  if (error) throw error
+}

@@ -7,17 +7,19 @@ const base: Task = {
   label: '김** 6-2 문진예정', due_on: '2026-09-19', status: '연락안됨', attempt: 0, note: '',
 }
 
-test('1회째 연락 안 됨 → 3일 뒤 재연락', () => {
+test('1회째 연락 안 됨 → 3일 뒤 재연락, 라벨에 회차', () => {
   const r = buildRecontact(base, 1)
   expect(r.kind).toBe('재연락')
-  expect(r.label).toContain('6-2')
+  expect(r.label).toBe('김** 6-2 재연락 1회차')
   expect(r.due_on).toBe('2026-09-22') // +3
   expect(r.note).toBe('')
 })
 
-test('2회째부터 → 10일 뒤 + 원장에게 얘기하기', () => {
-  const r = buildRecontact({ ...base, kind: '재연락' }, 2)
-  expect(r.due_on).toBe('2026-09-29') // +10
+test('2회째부터 → 10일 뒤 + 원장에게 얘기하기, 회차 누적', () => {
+  const prev = { ...base, kind: '재연락' as const, label: '김** 6-2 재연락 1회차' }
+  const r = buildRecontact(prev, 2)
+  expect(r.label).toBe('김** 6-2 재연락 2회차')
+  expect(r.due_on).toBe('2026-09-29') // +10 (prev due 09-19 → 09-29)
   expect(r.note).toContain('원장에게 얘기하기')
 })
 
