@@ -381,6 +381,8 @@ function closeModal(): void {
 
 // ---------- 액션 ----------
 async function handleClick(e: Event): Promise<void> {
+  // 팝업 바깥(어두운 배경)을 누르면 닫기
+  if ((e.target as HTMLElement).id === 'modal') { closeModal(); return }
   const el = (e.target as HTMLElement).closest('[data-action],[data-tab]') as HTMLElement | null
   if (!el) return
   const tab = el.getAttribute('data-tab')
@@ -562,6 +564,7 @@ async function handleClick(e: Event): Promise<void> {
 // ---------- 시작 ----------
 document.getElementById('root')!.addEventListener('click', (e) => { void handleClick(e) })
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeModal(); return }
   const tag = (e.target as HTMLElement).tagName
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
     e.preventDefault(); void doUndo()
