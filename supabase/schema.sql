@@ -9,7 +9,9 @@ drop table if exists settings cascade;
 create table patients (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  region text not null default '서울'
+  region text not null default '서울',
+  birth text not null default '',
+  first_herbal boolean not null default false
 );
 
 create table blocks (

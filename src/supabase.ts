@@ -88,3 +88,7 @@ export async function saveSettings(s: Settings): Promise<void> {
 export async function deletePatient(id: string): Promise<void> {
   await sb.from('patients').delete().eq('id', id) // 연쇄로 결제·처방·일정도 삭제
 }
+export async function deletePrescriptionCascade(prescriptionId: string): Promise<void> {
+  await sb.from('tasks').delete().eq('prescription_id', prescriptionId)
+  await sb.from('prescriptions').delete().eq('id', prescriptionId)
+}

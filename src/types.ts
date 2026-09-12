@@ -10,6 +10,8 @@ export interface Patient {
   id: string
   name: string
   region: Region // 서울/지방/해외 (지방·해외는 배지)
+  birth?: string // 생년 또는 생년월일 (동명이인 구분용, 선택)
+  first_herbal?: boolean // 한약 초진 여부
 }
 
 export interface Block {

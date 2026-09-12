@@ -14,7 +14,8 @@ export function buildTasksForPrescription(p: Patient, rx: Prescription, x: numbe
     if (mt) { numX = Number(mt[1]); numY = Number(mt[2]) }
   }
   const isLast = numY >= numX
-  const tag = `${p.name} ${num(numX, numY)}`
+  const dname = p.birth ? `${p.name}(${p.birth})` : p.name
+  const tag = `${dname} ${num(numX, numY)}`
 
   // 처방 (당일)
   tasks.push({
@@ -48,17 +49,17 @@ export function buildTasksForPrescription(p: Patient, rx: Prescription, x: numbe
     const m2 = finalMsg2Date(m1)
     tasks.push({
       patient_id: p.id, prescription_id: rx.id, kind: '마무리문자1',
-      label: `${p.name} 마무리 문자 1차`, due_on: m1, status: '예정', attempt: 0, note: '',
+      label: `${dname} 마무리 문자 1차`, due_on: m1, status: '예정', attempt: 0, note: '',
     })
     tasks.push({
       patient_id: p.id, prescription_id: rx.id, kind: '마무리문자2',
-      label: `${p.name} 마무리 문자 2차`, due_on: m2, status: '예정', attempt: 0, note: '',
+      label: `${dname} 마무리 문자 2차`, due_on: m2, status: '예정', attempt: 0, note: '',
     })
   } else {
     // 문진예정 (다음 번호)
     tasks.push({
       patient_id: p.id, prescription_id: rx.id, kind: '문진예정',
-      label: `${p.name} ${num(numX, numY + 1)} 문진예정`, due_on: followupDate(rx.prescribed_on, s), status: '예정', attempt: 0, note: '',
+      label: `${dname} ${num(numX, numY + 1)} 문진예정`, due_on: followupDate(rx.prescribed_on, s), status: '예정', attempt: 0, note: '',
     })
   }
   return tasks

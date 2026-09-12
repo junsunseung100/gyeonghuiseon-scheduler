@@ -4,7 +4,7 @@ import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
-  updateTask, deleteTasksBy, saveSettings, deletePatient,
+  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
@@ -36,7 +36,7 @@ const COLOR: Record<string, string> = {
 }
 const TABS: [string, string][] = [
   ['calendar', '달력'], ['today', '오늘 할 일'], ['weekly', '주간 요약'],
-  ['patients', '환자'], ['uncontactable', '연락 안 됨'], ['settings', '설정'],
+  ['patients', '환자'], ['uncontactable', '연락 안 됨'], ['stats', '통계'], ['settings', '설정'],
 ]
 
 // ---------- 유틸 ----------
@@ -45,6 +45,8 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 function patientById(id: string): Patient | undefined { return state.patients.find((p) => p.id === id) }
+function displayName(p: Patient): string { return p.birth ? `${p.name}(${p.birth})` : p.name }
+function nameExists(name: string): boolean { return state.patients.some((p) => p.name === name) }
 function latestBlock(pid: string): Block | undefined {
   const bs = state.blocks.filter((b) => b.patient_id === pid)
   return bs[bs.length - 1]
@@ -109,6 +111,7 @@ function render(): void {
   else if (state.tab === 'weekly') renderWeekly(view)
   else if (state.tab === 'patients') renderPatients(view)
   else if (state.tab === 'uncontactable') renderUncontactable(view)
+  else if (state.tab === 'stats') renderStats(view)
   else if (state.tab === 'settings') renderSettings(view)
 }
 
@@ -162,6 +165,8 @@ function taskActions(t: Task): string {
     btns.push(`<button class="btn" data-action="willcall" data-id="${t.id}">환자가 연락 주기로</button>`)
   }
   if (t.kind === '마무리문자1') btns.push(`<button class="btn" data-action="visited" data-id="${t.id}">내원함(2차 취소)</button>`)
+  if (t.kind === '처방' && t.prescription_id) btns.push(`<button class="btn" data-action="delRx" data-id="${t.prescription_id}">이 회차 전체 삭제</button>`)
+  btns.push(`<button class="btn" data-action="delTask" data-id="${t.id}">삭제</button>`)
   return btns.join('')
 }
 function taskLine(t: Task, overdue: boolean): string {
@@ -207,8 +212,11 @@ function renderPatients(view: HTMLElement): void {
     const inb = blk ? rxInBlock(blk.id).length : 0
     const prog = blk ? `${blk.x}-${inb} (${inb}/${blk.x})` : '결제 없음'
     const badge = p.region !== '서울' ? `<span class="badge">${p.region}</span>` : ''
+    const cj = p.first_herbal ? '<span class="badge">한약초진</span>' : ''
+    const blkCount = state.blocks.filter((b) => b.patient_id === p.id).length
+    const rxCount = state.prescriptions.filter((r) => r.patient_id === p.id).length
     return `<div class="card">
-      <div class="row"><b>${p.name}</b>${badge}<span class="muted">현재 ${prog}</span></div>
+      <div class="row"><b>${displayName(p)}</b>${badge}${cj}<span class="muted">현재 ${prog} · 결제 ${blkCount}회 · 처방 ${rxCount}회</span></div>
       <div class="row" style="margin-top:6px">
         <input type="date" id="rxdate-${p.id}" value="${todayStr()}">
         <button class="btn primary" data-action="addRx" data-id="${p.id}">이 날 처방 나감</button>
@@ -221,10 +229,13 @@ function renderPatients(view: HTMLElement): void {
       <b>환자 등록</b>
       <div class="row" style="margin-top:6px">
         <input id="np-name" placeholder="이름 (예: 김**)">
+        <input id="np-birth" style="width:110px" placeholder="생년(동명이인만)">
         <select id="np-region"><option>서울</option><option>지방</option><option>해외</option></select>
         <select id="np-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
+        <label style="font-size:13px"><input type="checkbox" id="np-first"> 한약 초진</label>
         <button class="btn primary" data-action="addPatient">등록</button>
       </div>
+      <p class="muted" style="margin-top:4px">생년은 같은 이름 환자가 있을 때만 넣으면 됩니다. 침 치료는 오래 했어도 한약이 처음이면 "한약 초진" 체크.</p>
     </div>
     <h3>환자 목록</h3>${cards || '<p class="muted">아직 없음</p>'}`
 }
@@ -236,6 +247,36 @@ function renderUncontactable(view: HTMLElement): void {
     .sort((a, b) => a.due_on.localeCompare(b.due_on))
   view.innerHTML = `<h3>연락 안 됨 · 재연락 · 대기</h3>
     ${list.length ? list.map((t) => taskLine(t, t.due_on < todayStr())).join('') : '<p class="muted">없음</p>'}`
+}
+
+// ---------- 통계 ----------
+function renderStats(view: HTMLElement): void {
+  // 환자별 첫 처방월
+  const firstMonth = new Map<string, string>()
+  for (const r of [...state.prescriptions].sort((a, b) => a.prescribed_on.localeCompare(b.prescribed_on))) {
+    if (!firstMonth.has(r.patient_id)) firstMonth.set(r.patient_id, r.prescribed_on.slice(0, 7))
+  }
+  // 최근 6개월
+  const months: string[] = []
+  const d = new Date()
+  for (let i = 5; i >= 0; i--) { const m = new Date(d.getFullYear(), d.getMonth() - i, 1); months.push(`${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}`) }
+  const rows = months.map((mo) => {
+    const paid = new Set(state.prescriptions.filter((r) => r.prescribed_on.startsWith(mo)).map((r) => r.patient_id)).size
+    let chojin = 0
+    for (const p of state.patients) if (p.first_herbal && firstMonth.get(p.id) === mo) chojin++
+    return `<tr><td>${mo}</td><td>${paid}</td><td>${chojin}</td></tr>`
+  }).join('')
+  const pr = state.patients.map((p) => {
+    const blk = state.blocks.filter((b) => b.patient_id === p.id).length
+    const rx = state.prescriptions.filter((r) => r.patient_id === p.id).length
+    return `<tr><td>${displayName(p)}</td><td>${blk}</td><td>${rx}</td><td>${p.first_herbal ? '○' : ''}</td></tr>`
+  }).join('')
+  view.innerHTML = `
+    <h3>월별 처방(결제) 환자 수 · 한약 초진 수</h3>
+    <table class="tbl"><thead><tr><th>월</th><th>처방 나간 환자 수</th><th>한약 초진 수</th></tr></thead><tbody>${rows}</tbody></table>
+    <h3>환자별 재복(결제·처방) 횟수</h3>
+    <table class="tbl"><thead><tr><th>환자</th><th>결제(블록) 수</th><th>처방 수</th><th>한약초진</th></tr></thead><tbody>${pr || '<tr><td colspan="4" class="muted">없음</td></tr>'}</tbody></table>
+    <p class="muted">한약 초진 수는 "한약 초진"으로 체크한 환자의 첫 처방이 그 달에 있는 경우를 셉니다.</p>`
 }
 
 // ---------- 설정 ----------
@@ -262,8 +303,8 @@ async function createRx(p: Patient, blk: Block, date: string, numberStr?: string
   const rx = await insertPrescription({ block_id: blk.id, patient_id: p.id, y, overall, prescribed_on: date })
   await insertTasks(buildTasksForPrescription(p, rx, blk.x, state.settings, numberStr))
 }
-async function registerPatient(name: string, region: Region, months: 1 | 2 | 3): Promise<{ p: Patient; blk: Block }> {
-  const p = await insertPatient({ name, region })
+async function registerPatient(name: string, region: Region, months: 1 | 2 | 3, birth: string, firstHerbal: boolean): Promise<{ p: Patient; blk: Block }> {
+  const p = await insertPatient({ name, region, birth, first_herbal: firstHerbal })
   const blk = await insertBlock({ patient_id: p.id, months, x: months * 2 })
   return { p, blk }
 }
@@ -272,8 +313,13 @@ async function registerPatient(name: string, region: Region, months: 1 | 2 | 3):
 function openDayModal(ds: string): void {
   state.pickDate = ds
   const modal = document.getElementById('modal') as HTMLElement
-  const opts = state.patients.map((p) => `<option value="${p.id}">${p.name}${p.region !== '서울' ? ` (${p.region})` : ''}</option>`).join('')
+  const opts = state.patients.map((p) => `<option value="${p.id}">${displayName(p)}${p.region !== '서울' ? ` (${p.region})` : ''}</option>`).join('')
   const firstSug = state.patients.length ? suggestNumber(state.patients[0].id) : ''
+  const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소')
+  const dayList = dayTasks.length
+    ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0"><b>이 날 일정 (지우기·완료)</b>` +
+      dayTasks.map((t) => `<div class="task"><span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b><div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
+    : ''
   modal.className = 'open'
   modal.innerHTML = `<div class="modal-box">
     <h3>${ds} — 처방 입력</h3>
@@ -289,15 +335,18 @@ function openDayModal(ds: string): void {
     <b>새 환자 등록하고 이 날 처방</b>
     <div class="row" style="margin-top:6px">
       <input id="m-name" placeholder="이름 (예: 김나나)">
+      <input id="m-birth" style="width:110px" placeholder="생년(동명이인만)">
       <select id="m-region"><option>서울</option><option>지방</option><option>해외</option></select>
       <select id="m-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
+      <label style="font-size:13px"><input type="checkbox" id="m-first"> 한약 초진</label>
     </div>
     <div class="row" style="margin-top:6px">
       <input id="m-num2" style="width:100px" placeholder="번호" value="2-1" title="예: 2-1 (고칠 수 있음)">
       <button class="btn primary" data-action="registerAndRx">등록하고 처방</button>
       <button class="btn" data-action="closeModal">닫기</button>
     </div>
-    <p class="muted" style="margin-top:8px">번호(2-1, 6-2 등)는 자동으로 채워지지만 직접 고쳐 쓸 수 있습니다.</p>
+    <p class="muted" style="margin-top:8px">번호(2-1, 6-2 등)는 자동으로 채워지지만 직접 고칠 수 있습니다. 생년은 같은 이름이 있을 때만.</p>
+    ${dayList}
   </div>`
   const patSel = document.getElementById('m-pat') as HTMLSelectElement | null
   if (patSel) patSel.addEventListener('change', () => {
@@ -345,10 +394,13 @@ async function handleClick(e: Event): Promise<void> {
   if (action === 'registerAndRx') {
     const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
     if (!name) { alert('이름을 입력하세요'); return }
+    const birth = (document.getElementById('m-birth') as HTMLInputElement).value.trim()
+    if (!birth && nameExists(name)) { alert('같은 이름 환자가 있습니다. 생년을 넣어 구분하거나, 위에서 기존 환자를 고르세요.'); return }
     const region = (document.getElementById('m-region') as HTMLSelectElement).value as Region
     const months = Number((document.getElementById('m-months') as HTMLSelectElement).value) as 1 | 2 | 3
+    const first = (document.getElementById('m-first') as HTMLInputElement).checked
     const numStr = (document.getElementById('m-num2') as HTMLInputElement).value.trim()
-    const { p, blk } = await registerPatient(name, region, months)
+    const { p, blk } = await registerPatient(name, region, months, birth, first)
     const warn = saturdayWarning(p, state.pickDate)
     if (warn && !confirm(warn + '\n그래도 진행할까요?')) { closeModal(); await reload(); return }
     await createRx(p, blk, state.pickDate, numStr); closeModal(); await reload(); return
@@ -357,10 +409,12 @@ async function handleClick(e: Event): Promise<void> {
   if (action === 'addPatient') {
     const name = (document.getElementById('np-name') as HTMLInputElement).value.trim()
     if (!name) { alert('이름을 입력하세요'); return }
+    const birth = (document.getElementById('np-birth') as HTMLInputElement).value.trim()
+    if (!birth && nameExists(name)) { alert('같은 이름 환자가 있습니다. 생년을 넣어 구분하세요.'); return }
     const region = (document.getElementById('np-region') as HTMLSelectElement).value as Region
     const months = Number((document.getElementById('np-months') as HTMLSelectElement).value) as 1 | 2 | 3
-    const p = await insertPatient({ name, region })
-    await insertBlock({ patient_id: p.id, months, x: months * 2 })
+    const first = (document.getElementById('np-first') as HTMLInputElement).checked
+    await registerPatient(name, region, months, birth, first)
     await reload(); return
   }
   if (action === 'addBlock') {
@@ -388,6 +442,15 @@ async function handleClick(e: Event): Promise<void> {
     const rx = await insertPrescription({ block_id: blk.id, patient_id: id, y, overall, prescribed_on: date })
     await insertTasks(buildTasksForPrescription(p, rx, blk.x, state.settings))
     await reload(); return
+  }
+
+  if (action === 'delRx') {
+    if (confirm('이 회차의 처방·문자·확인전화·문진 등을 모두 지울까요?')) { await deletePrescriptionCascade(id); closeModal(); await reload() }
+    return
+  }
+  if (action === 'delTask') {
+    if (t && confirm('이 항목을 지울까요?')) { await deleteTask(t.id); closeModal(); await reload() }
+    return
   }
 
   if (!t) return
