@@ -346,6 +346,11 @@ function openDayModal(ds: string): void {
            <input id="m-num" style="width:80px" placeholder="번호" value="${firstSug}" title="예: 2-2 (고칠 수 있음)">
            <button class="btn primary" data-action="rxForDay">이 날 처방 나감</button>
          </div>
+         <div class="row" style="margin-top:6px">
+           <span class="muted">약 다 먹고 다시 결제했으면 →</span>
+           <select id="m-newmonths"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
+           <button class="btn" data-action="rxNewBlock">새 결제로 처방(첫 회차)</button>
+         </div>
          <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">`
       : '<p class="muted">등록된 환자가 없습니다. 아래에서 새로 등록하세요.</p>'}
     <b>새 환자 등록하고 이 날 처방</b>
@@ -403,11 +408,21 @@ async function handleClick(e: Event): Promise<void> {
     const p = patientById(pid)!
     const blk = latestBlock(pid)
     if (!blk) { alert('이 환자는 결제(개월수)가 없습니다. 환자 탭에서 새 결제를 추가하세요.'); return }
-    if (rxInBlock(blk.id).length >= blk.x) { alert('이 결제분을 다 채웠습니다. 환자 탭에서 "새 결제 추가"를 먼저 하세요.'); return }
+    if (rxInBlock(blk.id).length >= blk.x) { alert('이 결제분을 다 채웠습니다. 아래 "새 결제로 처방(첫 회차)"을 쓰세요.'); return }
     const numStr = (document.getElementById('m-num') as HTMLInputElement).value.trim()
     const warn = saturdayWarning(p, state.pickDate)
     if (warn && !confirm(warn + '\n그래도 진행할까요?')) return
     await createRx(p, blk, state.pickDate, numStr); closeModal(); await reload(); return
+  }
+  if (action === 'rxNewBlock') {
+    const pid = (document.getElementById('m-pat') as HTMLSelectElement).value
+    const p = patientById(pid)!
+    const months = Number((document.getElementById('m-newmonths') as HTMLSelectElement).value) as 1 | 2 | 3
+    const warn = saturdayWarning(p, state.pickDate)
+    if (warn && !confirm(warn + '\n그래도 진행할까요?')) return
+    const blk = await insertBlock({ patient_id: pid, months, x: months * 2 })
+    await createRx(p, blk, state.pickDate, `${months * 2}-1`) // 새 블록 첫 회차 (예: 4-1)
+    closeModal(); await reload(); return
   }
   if (action === 'registerAndRx') {
     const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
