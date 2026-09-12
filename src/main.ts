@@ -322,12 +322,11 @@ async function registerPatient(name: string, region: Region, months: 1 | 2 | 3, 
   return { p, blk }
 }
 
-// ---------- 날짜 클릭 팝업 ----------
+// ---------- 날짜 클릭 팝업 (기존/신규 통합) ----------
 function openDayModal(ds: string): void {
   state.pickDate = ds
   const modal = document.getElementById('modal') as HTMLElement
-  const opts = state.patients.map((p) => `<option value="${p.id}">${displayName(p)}${p.region !== '서울' ? ` (${p.region})` : ''}</option>`).join('')
-  const firstSug = state.patients.length ? suggestNumber(state.patients[0].id) : ''
+  const datalist = state.patients.map((p) => `<option value="${displayName(p)}">`).join('')
   const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
   const dayList = dayTasks.length
     ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
@@ -339,45 +338,41 @@ function openDayModal(ds: string): void {
   modal.className = 'open'
   modal.innerHTML = `<div class="modal-box">
     <h3>${ds} — 처방 입력</h3>
-    ${state.patients.length
-      ? `<b>기존 환자에 이어서</b>
-         <div class="row" style="margin-top:6px">
-           <select id="m-pat">${opts}</select>
-           <input id="m-num" style="width:80px" placeholder="번호" value="${firstSug}" title="예: 2-2 (고칠 수 있음)">
-           <button class="btn primary" data-action="rxForDay">이 날 처방 나감</button>
-         </div>
-         <div class="row" style="margin-top:6px">
-           <span class="muted">약 다 먹고 다시 결제했으면 →</span>
-           <select id="m-newmonths"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
-           <button class="btn" data-action="rxNewBlock">새 결제로 처방(첫 회차)</button>
-         </div>
-         <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">`
-      : '<p class="muted">등록된 환자가 없습니다. 아래에서 새로 등록하세요.</p>'}
-    <b>새 환자 등록하고 이 날 처방</b>
+    <div class="row">
+      <input id="m-name" list="patlist" placeholder="환자 이름" style="width:150px" autocomplete="off">
+      <datalist id="patlist">${datalist}</datalist>
+      <input id="m-birth" style="width:100px" placeholder="생년(동명이인만)">
+      <input id="m-num" style="width:70px" placeholder="번호">
+      <button class="btn primary" data-action="rxSmart">처방 나감</button>
+    </div>
     <div class="row" style="margin-top:6px">
-      <input id="m-name" placeholder="이름 (예: 김나나)">
-      <input id="m-birth" style="width:110px" placeholder="생년(동명이인만)">
+      <span class="muted">새 환자·새 결제일 때만 →</span>
       <select id="m-region"><option>서울</option><option>지방</option><option>해외</option></select>
       <select id="m-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
       <label style="font-size:13px"><input type="checkbox" id="m-first"> 한약 초진</label>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <input id="m-num2" style="width:100px" placeholder="번호" value="2-1" title="예: 2-1 (고칠 수 있음)">
-      <button class="btn primary" data-action="registerAndRx">등록하고 처방</button>
       <button class="btn" data-action="closeModal">닫기</button>
     </div>
-    <p class="muted" style="margin-top:8px">번호(2-1, 6-2 등)는 자동으로 채워지지만 직접 고칠 수 있습니다. 생년은 같은 이름이 있을 때만.</p>
+    <p class="muted" style="margin-top:6px">이름을 치면 기존 환자가 자동완성됩니다. 이어서 처방하면 다음 번호(2-2 등)로, 약을 다 먹은 환자는 개월수를 골라 처방하면 새 결제(4-1 등)로 이어집니다. 없는 이름은 새 환자로 등록됩니다. 번호는 자동으로 채워지고 고칠 수 있습니다.</p>
     ${dayList}
   </div>`
-  const patSel = document.getElementById('m-pat') as HTMLSelectElement | null
-  if (patSel) patSel.addEventListener('change', () => {
-    const el = document.getElementById('m-num') as HTMLInputElement
-    el.value = suggestNumber(patSel.value)
-  })
-  const monSel = document.getElementById('m-months') as HTMLSelectElement
-  monSel.addEventListener('change', () => {
-    (document.getElementById('m-num2') as HTMLInputElement).value = `${Number(monSel.value) * 2}-1`
-  })
+  // 번호 자동완성
+  const nameEl = document.getElementById('m-name') as HTMLInputElement
+  const birthEl = document.getElementById('m-birth') as HTMLInputElement
+  const numEl = document.getElementById('m-num') as HTMLInputElement
+  const monEl = document.getElementById('m-months') as HTMLSelectElement
+  const refresh = (): void => {
+    const disp = birthEl.value.trim() ? `${nameEl.value.trim()}(${birthEl.value.trim()})` : nameEl.value.trim()
+    const ex = state.patients.find((p) => displayName(p) === disp)
+    if (ex) {
+      const blk = latestBlock(ex.id)
+      numEl.value = (blk && rxInBlock(blk.id).length < blk.x) ? suggestNumber(ex.id) : `${Number(monEl.value) * 2}-1`
+    } else {
+      numEl.value = `${Number(monEl.value) * 2}-1`
+    }
+  }
+  nameEl.addEventListener('input', refresh)
+  birthEl.addEventListener('input', refresh)
+  monEl.addEventListener('change', refresh)
 }
 function closeModal(): void {
   const modal = document.getElementById('modal') as HTMLElement
@@ -403,40 +398,35 @@ async function handleClick(e: Event): Promise<void> {
   // 달력 날짜 클릭 → 팝업
   if (action === 'pickDay') { openDayModal(el.getAttribute('data-date')!); return }
   if (action === 'closeModal') { closeModal(); return }
-  if (action === 'rxForDay') {
-    const pid = (document.getElementById('m-pat') as HTMLSelectElement).value
-    const p = patientById(pid)!
-    const blk = latestBlock(pid)
-    if (!blk) { alert('이 환자는 결제(개월수)가 없습니다. 환자 탭에서 새 결제를 추가하세요.'); return }
-    if (rxInBlock(blk.id).length >= blk.x) { alert('이 결제분을 다 채웠습니다. 아래 "새 결제로 처방(첫 회차)"을 쓰세요.'); return }
-    const numStr = (document.getElementById('m-num') as HTMLInputElement).value.trim()
-    const warn = saturdayWarning(p, state.pickDate)
-    if (warn && !confirm(warn + '\n그래도 진행할까요?')) return
-    await createRx(p, blk, state.pickDate, numStr); closeModal(); await reload(); return
-  }
-  if (action === 'rxNewBlock') {
-    const pid = (document.getElementById('m-pat') as HTMLSelectElement).value
-    const p = patientById(pid)!
-    const months = Number((document.getElementById('m-newmonths') as HTMLSelectElement).value) as 1 | 2 | 3
-    const warn = saturdayWarning(p, state.pickDate)
-    if (warn && !confirm(warn + '\n그래도 진행할까요?')) return
-    const blk = await insertBlock({ patient_id: pid, months, x: months * 2 })
-    await createRx(p, blk, state.pickDate, `${months * 2}-1`) // 새 블록 첫 회차 (예: 4-1)
-    closeModal(); await reload(); return
-  }
-  if (action === 'registerAndRx') {
+  if (action === 'rxSmart') {
     const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
-    if (!name) { alert('이름을 입력하세요'); return }
+    if (!name) { alert('환자 이름을 입력하세요.'); return }
     const birth = (document.getElementById('m-birth') as HTMLInputElement).value.trim()
-    if (!birth && nameExists(name)) { alert('같은 이름 환자가 있습니다. 생년을 넣어 구분하거나, 위에서 기존 환자를 고르세요.'); return }
-    const region = (document.getElementById('m-region') as HTMLSelectElement).value as Region
+    const disp = birth ? `${name}(${birth})` : name
+    const numField = (document.getElementById('m-num') as HTMLInputElement).value.trim()
     const months = Number((document.getElementById('m-months') as HTMLSelectElement).value) as 1 | 2 | 3
+    const existing = state.patients.find((p) => displayName(p) === disp)
+    if (existing) {
+      const warn = saturdayWarning(existing, state.pickDate)
+      if (warn && !confirm(warn + '\n그래도 진행할까요?')) return
+      const blk = latestBlock(existing.id)
+      if (blk && rxInBlock(blk.id).length < blk.x) {
+        await createRx(existing, blk, state.pickDate, numField) // 같은 결제분 이어서
+      } else {
+        const nb = await insertBlock({ patient_id: existing.id, months, x: months * 2 }) // 다 먹음 → 새 결제
+        await createRx(existing, nb, state.pickDate, numField || `${months * 2}-1`)
+      }
+      closeModal(); await reload(); return
+    }
+    // 없는 이름 → 새 환자
+    if (!birth && nameExists(name)) { alert('같은 이름 환자가 있습니다. 생년을 넣어 구분하세요. (기존 환자면 자동완성에서 고르세요)'); return }
+    const region = (document.getElementById('m-region') as HTMLSelectElement).value as Region
     const first = (document.getElementById('m-first') as HTMLInputElement).checked
-    const numStr = (document.getElementById('m-num2') as HTMLInputElement).value.trim()
+    const warnN = saturdayWarning({ id: '', name, region } as Patient, state.pickDate)
+    if (warnN && !confirm(warnN + '\n그래도 진행할까요?')) return
     const { p, blk } = await registerPatient(name, region, months, birth, first)
-    const warn = saturdayWarning(p, state.pickDate)
-    if (warn && !confirm(warn + '\n그래도 진행할까요?')) { closeModal(); await reload(); return }
-    await createRx(p, blk, state.pickDate, numStr); closeModal(); await reload(); return
+    await createRx(p, blk, state.pickDate, numField || `${months * 2}-1`)
+    closeModal(); await reload(); return
   }
 
   if (action === 'addPatient') {
