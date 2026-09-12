@@ -330,8 +330,11 @@ function openDayModal(ds: string): void {
   const firstSug = state.patients.length ? suggestNumber(state.patients[0].id) : ''
   const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
   const dayList = dayTasks.length
-    ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0"><b>이 날 일정 (지우기·완료)</b>` +
-      dayTasks.map((t) => `<div class="task"><span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b><div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
+    ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
+       <div class="row"><b>이 날 일정</b><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">여러 개 체크해서 한 번에 삭제</span></div>` +
+      dayTasks.map((t) => `<div class="task">
+        <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b></label>
+        <div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
     : ''
   modal.className = 'open'
   modal.innerHTML = `<div class="modal-box">
@@ -487,6 +490,18 @@ async function handleClick(e: Event): Promise<void> {
     return
   }
   if (action === 'undo') { await doUndo(); return }
+  if (action === 'delSelected') {
+    const ds = el.getAttribute('data-date')!
+    const ids = Array.from(document.querySelectorAll('.m-del:checked')).map((c) => (c as HTMLElement).getAttribute('data-id')!)
+    if (!ids.length) { alert('지울 항목을 체크하세요.'); return }
+    if (!confirm(`선택한 ${ids.length}개를 지울까요? (Ctrl+Z로 되돌릴 수 있음)`)) return
+    const snaps = state.tasks.filter((x) => ids.includes(x.id))
+    pushUndo(async () => { await insertRaw('tasks', snaps as unknown as Record<string, unknown>[]) })
+    for (const tid of ids) await deleteTask(tid)
+    await reload()
+    openDayModal(ds) // 팝업 유지(갱신)
+    return
+  }
 
   if (!t) return
   if (action === 'done') { await updateTask(t.id, { status: '완료' }); await reload(); return }
