@@ -331,7 +331,7 @@ function openDayModal(ds: string): void {
   const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
   const dayList = dayTasks.length
     ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
-       <div class="row"><b>이 날 일정</b><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">여러 개 체크해서 한 번에 삭제</span></div>` +
+       <div class="row"><b>이 날 일정</b><button class="btn" data-action="selectAllDay">전체 선택</button><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">전체 선택 후 한 번에 삭제 가능</span></div>` +
       dayTasks.map((t) => `<div class="task">
         <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b></label>
         <div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
@@ -492,6 +492,12 @@ async function handleClick(e: Event): Promise<void> {
     return
   }
   if (action === 'undo') { await doUndo(); return }
+  if (action === 'selectAllDay') {
+    const boxes = Array.from(document.querySelectorAll('.m-del')) as HTMLInputElement[]
+    const allChecked = boxes.length > 0 && boxes.every((b) => b.checked)
+    boxes.forEach((b) => { b.checked = !allChecked })
+    return
+  }
   if (action === 'delSelected') {
     const ds = el.getAttribute('data-date')!
     const ids = Array.from(document.querySelectorAll('.m-del:checked')).map((c) => (c as HTMLElement).getAttribute('data-id')!)
