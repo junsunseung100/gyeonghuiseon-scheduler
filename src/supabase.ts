@@ -85,3 +85,6 @@ export async function saveSettings(s: Settings): Promise<void> {
   const { error } = await sb.from('settings').update(s).eq('id', 1)
   if (error) throw error
 }
+export async function deletePatient(id: string): Promise<void> {
+  await sb.from('patients').delete().eq('id', id) // 연쇄로 결제·처방·일정도 삭제
+}

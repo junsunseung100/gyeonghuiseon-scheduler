@@ -5,9 +5,16 @@ import { isClinicClosed, dow } from './holidays'
 type NewTask = Omit<Task, 'id'>
 const num = (x: number, y: number) => `${x}-${y}`
 
-export function buildTasksForPrescription(p: Patient, rx: Prescription, x: number, s: Settings): NewTask[] {
+// numberOverride: "2-2" 처럼 원장이 직접 적은 번호. 있으면 그 번호를 쓴다.
+export function buildTasksForPrescription(p: Patient, rx: Prescription, x: number, s: Settings, numberOverride?: string): NewTask[] {
   const tasks: NewTask[] = []
-  const tag = `${p.name} ${num(x, rx.y)}`
+  let numX = x, numY = rx.y
+  if (numberOverride) {
+    const mt = numberOverride.match(/^(\d+)-(\d+)$/)
+    if (mt) { numX = Number(mt[1]); numY = Number(mt[2]) }
+  }
+  const isLast = numY >= numX
+  const tag = `${p.name} ${num(numX, numY)}`
 
   // 처방 (당일)
   tasks.push({
@@ -35,7 +42,7 @@ export function buildTasksForPrescription(p: Patient, rx: Prescription, x: numbe
     label: `${tag} 확인전화`, due_on: confirmCallDate(rx.prescribed_on, s), status: '예정', attempt: 0, note: '',
   })
 
-  if (rx.y === x) {
+  if (isLast) {
     // 마지막 회차: 마무리문자 1·2
     const m1 = finalMsg1Date(rx.prescribed_on)
     const m2 = finalMsg2Date(m1)
@@ -51,7 +58,7 @@ export function buildTasksForPrescription(p: Patient, rx: Prescription, x: numbe
     // 문진예정 (다음 번호)
     tasks.push({
       patient_id: p.id, prescription_id: rx.id, kind: '문진예정',
-      label: `${p.name} ${num(x, rx.y + 1)} 문진예정`, due_on: followupDate(rx.prescribed_on, s), status: '예정', attempt: 0, note: '',
+      label: `${p.name} ${num(numX, numY + 1)} 문진예정`, due_on: followupDate(rx.prescribed_on, s), status: '예정', attempt: 0, note: '',
     })
   }
   return tasks

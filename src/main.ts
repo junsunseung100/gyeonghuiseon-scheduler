@@ -4,7 +4,7 @@ import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
-  updateTask, deleteTasksBy, saveSettings,
+  updateTask, deleteTasksBy, saveSettings, deletePatient,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
@@ -50,6 +50,11 @@ function latestBlock(pid: string): Block | undefined {
   return bs[bs.length - 1]
 }
 function rxInBlock(blockId: string): Prescription[] { return state.prescriptions.filter((r) => r.block_id === blockId) }
+function suggestNumber(pid: string): string {
+  const blk = latestBlock(pid)
+  if (!blk) return ''
+  return `${blk.x}-${rxInBlock(blk.id).length + 1}`
+}
 
 // ---------- 데이터 로드 ----------
 async function reload(): Promise<void> {
@@ -208,6 +213,7 @@ function renderPatients(view: HTMLElement): void {
         <input type="date" id="rxdate-${p.id}" value="${todayStr()}">
         <button class="btn primary" data-action="addRx" data-id="${p.id}">이 날 처방 나감</button>
         <button class="btn" data-action="addBlock" data-id="${p.id}">새 결제 추가</button>
+        <button class="btn" data-action="delPatient" data-id="${p.id}">삭제</button>
       </div></div>`
   }).join('')
   view.innerHTML = `
@@ -247,12 +253,14 @@ function renderSettings(view: HTMLElement): void {
 }
 
 // ---------- 처방 생성 공통 ----------
-async function createRx(p: Patient, blk: Block, date: string): Promise<void> {
+async function createRx(p: Patient, blk: Block, date: string, numberStr?: string): Promise<void> {
   const inb = rxInBlock(blk.id)
-  const y = inb.length + 1
+  let y = inb.length + 1
+  const mt = numberStr ? numberStr.match(/^\d+-(\d+)$/) : null
+  if (mt) y = Number(mt[1]) // 직접 적은 번호의 Y를 저장
   const overall = state.prescriptions.filter((r) => r.patient_id === p.id).length + 1
   const rx = await insertPrescription({ block_id: blk.id, patient_id: p.id, y, overall, prescribed_on: date })
-  await insertTasks(buildTasksForPrescription(p, rx, blk.x, state.settings))
+  await insertTasks(buildTasksForPrescription(p, rx, blk.x, state.settings, numberStr))
 }
 async function registerPatient(name: string, region: Region, months: 1 | 2 | 3): Promise<{ p: Patient; blk: Block }> {
   const p = await insertPatient({ name, region })
@@ -265,23 +273,41 @@ function openDayModal(ds: string): void {
   state.pickDate = ds
   const modal = document.getElementById('modal') as HTMLElement
   const opts = state.patients.map((p) => `<option value="${p.id}">${p.name}${p.region !== '서울' ? ` (${p.region})` : ''}</option>`).join('')
+  const firstSug = state.patients.length ? suggestNumber(state.patients[0].id) : ''
   modal.className = 'open'
   modal.innerHTML = `<div class="modal-box">
     <h3>${ds} — 처방 입력</h3>
     ${state.patients.length
-      ? `<div class="row"><select id="m-pat">${opts}</select><button class="btn primary" data-action="rxForDay">이 날 처방 나감</button></div>`
+      ? `<b>기존 환자에 이어서</b>
+         <div class="row" style="margin-top:6px">
+           <select id="m-pat">${opts}</select>
+           <input id="m-num" style="width:80px" placeholder="번호" value="${firstSug}" title="예: 2-2 (고칠 수 있음)">
+           <button class="btn primary" data-action="rxForDay">이 날 처방 나감</button>
+         </div>
+         <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">`
       : '<p class="muted">등록된 환자가 없습니다. 아래에서 새로 등록하세요.</p>'}
-    <hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
     <b>새 환자 등록하고 이 날 처방</b>
     <div class="row" style="margin-top:6px">
       <input id="m-name" placeholder="이름 (예: 김나나)">
       <select id="m-region"><option>서울</option><option>지방</option><option>해외</option></select>
       <select id="m-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
     </div>
-    <div class="row" style="margin-top:8px">
+    <div class="row" style="margin-top:6px">
+      <input id="m-num2" style="width:100px" placeholder="번호" value="2-1" title="예: 2-1 (고칠 수 있음)">
       <button class="btn primary" data-action="registerAndRx">등록하고 처방</button>
       <button class="btn" data-action="closeModal">닫기</button>
-    </div></div>`
+    </div>
+    <p class="muted" style="margin-top:8px">번호(2-1, 6-2 등)는 자동으로 채워지지만 직접 고쳐 쓸 수 있습니다.</p>
+  </div>`
+  const patSel = document.getElementById('m-pat') as HTMLSelectElement | null
+  if (patSel) patSel.addEventListener('change', () => {
+    const el = document.getElementById('m-num') as HTMLInputElement
+    el.value = suggestNumber(patSel.value)
+  })
+  const monSel = document.getElementById('m-months') as HTMLSelectElement
+  monSel.addEventListener('change', () => {
+    (document.getElementById('m-num2') as HTMLInputElement).value = `${Number(monSel.value) * 2}-1`
+  })
 }
 function closeModal(): void {
   const modal = document.getElementById('modal') as HTMLElement
@@ -311,19 +337,21 @@ async function handleClick(e: Event): Promise<void> {
     const blk = latestBlock(pid)
     if (!blk) { alert('이 환자는 결제(개월수)가 없습니다. 환자 탭에서 새 결제를 추가하세요.'); return }
     if (rxInBlock(blk.id).length >= blk.x) { alert('이 결제분을 다 채웠습니다. 환자 탭에서 "새 결제 추가"를 먼저 하세요.'); return }
+    const numStr = (document.getElementById('m-num') as HTMLInputElement).value.trim()
     const warn = saturdayWarning(p, state.pickDate)
     if (warn && !confirm(warn + '\n그래도 진행할까요?')) return
-    await createRx(p, blk, state.pickDate); closeModal(); await reload(); return
+    await createRx(p, blk, state.pickDate, numStr); closeModal(); await reload(); return
   }
   if (action === 'registerAndRx') {
     const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
     if (!name) { alert('이름을 입력하세요'); return }
     const region = (document.getElementById('m-region') as HTMLSelectElement).value as Region
     const months = Number((document.getElementById('m-months') as HTMLSelectElement).value) as 1 | 2 | 3
+    const numStr = (document.getElementById('m-num2') as HTMLInputElement).value.trim()
     const { p, blk } = await registerPatient(name, region, months)
     const warn = saturdayWarning(p, state.pickDate)
     if (warn && !confirm(warn + '\n그래도 진행할까요?')) { closeModal(); await reload(); return }
-    await createRx(p, blk, state.pickDate); closeModal(); await reload(); return
+    await createRx(p, blk, state.pickDate, numStr); closeModal(); await reload(); return
   }
 
   if (action === 'addPatient') {
@@ -340,6 +368,11 @@ async function handleClick(e: Event): Promise<void> {
     if (![1, 2, 3].includes(m)) return
     await insertBlock({ patient_id: id, months: m as 1 | 2 | 3, x: m * 2 })
     await reload(); return
+  }
+  if (action === 'delPatient') {
+    const p = patientById(id)
+    if (p && confirm(`${p.name} 환자와 관련된 모든 일정을 지울까요?`)) { await deletePatient(id); await reload() }
+    return
   }
   if (action === 'addRx') {
     const p = patientById(id)!
