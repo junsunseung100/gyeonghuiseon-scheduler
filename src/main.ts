@@ -120,8 +120,10 @@ function renderCalendar(view: HTMLElement): void {
     const closed = isClinicClosed(ds, state.settings)
     const hol = isHoliday(ds, state.settings)
     const noDel = state.settings.no_delivery.includes(ds)
+    const count = dayTasks.length > 5 ? `<span class="cellcount">${dayTasks.length}건 · 스크롤 ↕</span>` : ''
     cells.push(`<td class="${closed ? 'closed' : ''} ${ds === todayStr() ? 'today' : ''}">
-      <div class="daynum">${d}${hol ? ' <span class="holiday">공휴일</span>' : ''}${noDel ? ' <span class="holiday">택배불가</span>' : ''}</div>${chips}</td>`)
+      <div class="daynum">${d}${hol ? ' <span class="holiday">공휴일</span>' : ''}${noDel ? ' <span class="holiday">택배불가</span>' : ''} ${count}</div>
+      <div class="cellbox">${chips}</div></td>`)
   }
   const rows: string[] = []
   for (let i = 0; i < cells.length; i += 7) rows.push('<tr>' + cells.slice(i, i + 7).join('') + '</tr>')
