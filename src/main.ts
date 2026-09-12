@@ -125,7 +125,7 @@ function renderCalendar(view: HTMLElement): void {
   for (let i = 0; i < startDow; i++) cells.push('<td></td>')
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소')
+    const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
     // 같은 처방의 처방+문자가 같은 날이면 한 줄로 합침: "김나나 6-1 처방 문자"
     const shown = dayTasks.filter((t) => !(t.kind === '문자' && dayTasks.some((o) => o.kind === '처방' && o.prescription_id === t.prescription_id)))
     const chips = shown.map((t) => {
@@ -177,7 +177,7 @@ function taskLine(t: Task, overdue: boolean): string {
 }
 function renderToday(view: HTMLElement): void {
   const today = todayStr()
-  const open = state.tasks.filter((t) => t.status !== '완료' && t.status !== '취소' && t.status !== '대기')
+  const open = state.tasks.filter((t) => t.status !== '완료' && t.status !== '취소' && t.status !== '대기' && t.status !== '연락안됨')
   const past = open.filter((t) => t.due_on < today).sort((a, b) => a.due_on.localeCompare(b.due_on))
   const now2 = open.filter((t) => t.due_on === today)
   const soonMax = (() => { const d = new Date(); d.setDate(d.getDate() + 4); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })()
@@ -315,7 +315,7 @@ function openDayModal(ds: string): void {
   const modal = document.getElementById('modal') as HTMLElement
   const opts = state.patients.map((p) => `<option value="${p.id}">${displayName(p)}${p.region !== '서울' ? ` (${p.region})` : ''}</option>`).join('')
   const firstSug = state.patients.length ? suggestNumber(state.patients[0].id) : ''
-  const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소')
+  const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
   const dayList = dayTasks.length
     ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0"><b>이 날 일정 (지우기·완료)</b>` +
       dayTasks.map((t) => `<div class="task"><span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b><div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
@@ -461,8 +461,13 @@ async function handleClick(e: Event): Promise<void> {
     return
   }
   if (action === 'nocontact') {
+    const rc = buildRecontact(t, t.attempt + 1)
     await updateTask(t.id, { status: '연락안됨' })
-    await insertTasks([buildRecontact(t, t.attempt + 1)])
+    await insertTasks([rc])
+    const [yy, mm] = rc.due_on.split('-').map(Number)
+    state.year = yy; state.month = mm - 1; state.tab = 'calendar'
+    closeModal()
+    alert(`다음 재연락을 ${rc.due_on}에 만들었습니다.${rc.note ? ' — ' + rc.note : ''}`)
     await reload(); return
   }
   if (action === 'willcall') {
