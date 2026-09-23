@@ -4,7 +4,7 @@ import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
-  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo,
+  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
@@ -23,12 +23,13 @@ interface State {
   year: number
   month: number // 0-11
   pickDate: string // 달력에서 클릭한 날짜
+  unlocked: boolean // PIN 통과 여부
 }
 const now = new Date()
 const state: State = {
   user: null, patients: [], blocks: [], prescriptions: [], tasks: [],
   settings: { weekly_closed: [0, 4], holidays: [], no_delivery: [] },
-  tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '',
+  tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', unlocked: false,
 }
 
 const COLOR: Record<string, string> = {
@@ -107,10 +108,32 @@ function renderLogin(root: HTMLElement): void {
   })
 }
 
+// ---------- 렌더: PIN 잠금 ----------
+function renderPin(root: HTMLElement): void {
+  root.innerHTML = `
+    <div id="login" class="card">
+      <h1>경희선한의원 · 문진일정</h1>
+      <p class="muted">4자리 비밀번호(PIN)를 입력하세요.</p>
+      <input id="pinInput" inputmode="numeric" maxlength="4" placeholder="● ● ● ●" style="width:100%;font-size:24px;text-align:center;letter-spacing:8px;padding:8px">
+      <div id="pinErr" style="color:var(--red);font-size:12px;margin-top:8px"></div>
+      <button class="btn primary" style="margin-top:12px;width:100%;padding:8px" data-action="pinEnter">들어가기</button>
+    </div>`
+  const inp = root.querySelector('#pinInput') as HTMLInputElement
+  inp.focus()
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { void handlePinEnter() } })
+}
+async function handlePinEnter(): Promise<void> {
+  const inp = document.getElementById('pinInput') as HTMLInputElement | null
+  if (!inp) return
+  if (inp.value === (state.settings.pin ?? '')) { state.unlocked = true; render() }
+  else { const e = document.getElementById('pinErr'); if (e) e.textContent = 'PIN이 틀렸습니다.'; inp.value = '' }
+}
+
 // ---------- 렌더: 앱 ----------
 function render(): void {
   const root = document.getElementById('root') as HTMLElement
   if (!state.user) { renderLogin(root); return }
+  if (state.settings.pin && !state.unlocked) { renderPin(root); return }
   root.innerHTML = `
     <header>
       <h1>경희선한의원 · 문진일정 달력</h1>
@@ -220,6 +243,16 @@ function taskActions(t: Task): string {
     btns.push(`<button class="btn" data-action="willcall" data-id="${t.id}">환자가 연락 주기로</button>`)
   }
   if (t.kind === '마무리문자1') btns.push(`<button class="btn" data-action="visited" data-id="${t.id}">내원함(2차 취소)</button>`)
+  // 문자 보내기: 전화번호가 있으면 문자 앱을 미리 채워 연다
+  if (t.kind === '처방문자' || t.kind === '마무리문자1' || t.kind === '마무리문자2') {
+    const pt = t.patient_id ? patientById(t.patient_id) : undefined
+    if (pt && pt.phone) {
+      const body = t.kind === '처방문자'
+        ? '안녕하세요, 경희선한의원입니다. 한약이 곧 도착 예정입니다. 받으시면 확인 부탁드립니다.'
+        : '안녕하세요, 경희선한의원입니다. 그동안 어떠셨는지요? 궁금한 점 있으시면 연락 주세요.'
+      btns.push(`<a class="btn primary" href="sms:${pt.phone.replace(/[^0-9]/g, '')}?body=${encodeURIComponent(body)}">문자 보내기</a>`)
+    }
+  }
   if ((t.kind === '처방문자' || t.kind === '처방') && t.prescription_id) btns.push(`<button class="btn" data-action="delRx" data-id="${t.prescription_id}">이 회차 전체 삭제</button>`)
   btns.push(`<button class="btn" data-action="delTask" data-id="${t.id}">삭제</button>`)
   return btns.join('')
@@ -276,6 +309,10 @@ function renderPatients(view: HTMLElement): void {
     return `<div class="card">
       <div class="row"><b>${displayName(p)}</b>${badge}${cj}<span class="muted">현재 ${prog} · 결제 ${blkCount}회 · 처방 ${rxCount}회</span></div>
       <div class="row" style="margin-top:6px">
+        <input id="ph-${p.id}" placeholder="전화번호(문자용)" value="${p.phone ?? ''}" style="width:140px">
+        <button class="btn" data-action="setPhone" data-id="${p.id}">전화 저장</button>
+      </div>
+      <div class="row" style="margin-top:6px">
         <input type="date" id="rxdate-${p.id}" value="${todayStr()}">
         <button class="btn primary" data-action="addRx" data-id="${p.id}">이 날 처방 나감</button>
         <button class="btn" data-action="addBlock" data-id="${p.id}">새 결제 추가</button>
@@ -288,6 +325,7 @@ function renderPatients(view: HTMLElement): void {
       <div class="row" style="margin-top:6px">
         <input id="np-name" placeholder="이름 (예: 김**)">
         <input id="np-birth" style="width:110px" placeholder="생년(동명이인만)">
+        <input id="np-phone" style="width:130px" placeholder="전화번호(선택)">
         <select id="np-region"><option>서울</option><option>지방</option><option>해외</option></select>
         <select id="np-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
         <label style="font-size:13px"><input type="checkbox" id="np-first"> 한약 초진</label>
@@ -344,8 +382,11 @@ function renderSettings(view: HTMLElement): void {
   const hol = state.settings.holidays.map((h) => `<span class="badge">${h} <button class="btn" data-action="delHoliday" data-date="${h}">x</button></span>`).join(' ')
   const nod = state.settings.no_delivery.map((h) => `<span class="badge">${h} <button class="btn" data-action="delNoDel" data-date="${h}">x</button></span>`).join(' ')
   view.innerHTML = `
+    <div class="card"><b>간단 로그인 (PIN)</b>
+      <div class="row" style="margin-top:6px"><input id="pinSet" inputmode="numeric" maxlength="4" placeholder="숫자 4자리" value="${state.settings.pin ?? ''}" style="width:110px"><button class="btn primary" data-action="setPin">저장</button></div>
+      <span class="muted">PIN을 정하면 다음부터 이 4자리만으로 들어갑니다. 비우고 저장하면 PIN을 끕니다.</span></div>
     <div class="card"><b>매주 휴진 요일</b><div class="row" style="margin-top:6px">${wkBtns}</div><span class="muted">기본: 일·목</span></div>
-    <div class="card"><b>법정공휴일</b><div style="margin:6px 0">${hol || '<span class="muted">없음</span>'}</div>
+    <div class="card"><b>법정공휴일</b><div style="margin:6px 0">${hol || '<span class="muted">양력 고정 공휴일(개천절 등)은 자동 인식됩니다. 음력·대체공휴일만 여기 추가</span>'}</div>
       <div class="row"><input type="date" id="holDate"><button class="btn primary" data-action="addHoliday">추가</button></div></div>
     <div class="card"><b>원외탕전 택배 불가일</b><div style="margin:6px 0">${nod || '<span class="muted">없음</span>'}</div>
       <div class="row"><input type="date" id="nodDate"><button class="btn primary" data-action="addNoDel">추가</button></div></div>`
@@ -374,8 +415,8 @@ async function createRx(p: Patient, blk: Block, date: string, numberStr?: string
   }
   await insertTasks(newTasks)
 }
-async function registerPatient(name: string, region: Region, months: 1 | 2 | 3, birth: string, firstHerbal: boolean): Promise<{ p: Patient; blk: Block }> {
-  const p = await insertPatient({ name, region, birth, first_herbal: firstHerbal })
+async function registerPatient(name: string, region: Region, months: 1 | 2 | 3, birth: string, firstHerbal: boolean, phone = ''): Promise<{ p: Patient; blk: Block }> {
+  const p = await insertPatient({ name, region, birth, first_herbal: firstHerbal, phone })
   const blk = await insertBlock({ patient_id: p.id, months, x: months * 2 })
   return { p, blk }
 }
@@ -457,6 +498,14 @@ async function handleClick(e: Event): Promise<void> {
   const id = el.getAttribute('data-id') ?? ''
   const t = state.tasks.find((x) => x.id === id)
 
+  if (action === 'pinEnter') { await handlePinEnter(); return }
+  if (action === 'setPin') {
+    const v = (document.getElementById('pinSet') as HTMLInputElement).value.trim()
+    if (v && !/^\d{4}$/.test(v)) { alert('숫자 4자리로 입력하세요.'); return }
+    await saveSettings({ ...state.settings, pin: v })
+    alert(v ? 'PIN을 저장했습니다.' : 'PIN을 껐습니다.')
+    await reload(); return
+  }
   if (action === 'logout') { await signOut(); return }
   if (action === 'prevMonth') { state.month--; if (state.month < 0) { state.month = 11; state.year-- } render(); return }
   if (action === 'nextMonth') { state.month++; if (state.month > 11) { state.month = 0; state.year++ } render(); return }
@@ -503,7 +552,13 @@ async function handleClick(e: Event): Promise<void> {
     const region = (document.getElementById('np-region') as HTMLSelectElement).value as Region
     const months = Number((document.getElementById('np-months') as HTMLSelectElement).value) as 1 | 2 | 3
     const first = (document.getElementById('np-first') as HTMLInputElement).checked
-    await registerPatient(name, region, months, birth, first)
+    const phone = (document.getElementById('np-phone') as HTMLInputElement).value.trim()
+    await registerPatient(name, region, months, birth, first, phone)
+    await reload(); return
+  }
+  if (action === 'setPhone') {
+    const phone = (document.getElementById(`ph-${id}`) as HTMLInputElement).value.trim()
+    await updatePatient(id, { phone })
     await reload(); return
   }
   if (action === 'addBlock') {

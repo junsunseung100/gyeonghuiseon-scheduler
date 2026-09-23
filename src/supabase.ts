@@ -57,6 +57,10 @@ export async function insertPatient(p: Omit<Patient, 'id'>): Promise<Patient> {
   if (error) throw error
   return data as Patient
 }
+export async function updatePatient(id: string, patch: Partial<Patient>): Promise<void> {
+  const { error } = await sb.from('patients').update(patch).eq('id', id)
+  if (error) throw error
+}
 export async function insertBlock(b: Omit<Block, 'id' | 'created_at'>): Promise<Block> {
   const { data, error } = await sb.from('blocks').insert(b).select().single()
   if (error) throw error
