@@ -28,7 +28,7 @@ const now = new Date()
 const state: State = {
   user: null, patients: [], blocks: [], prescriptions: [], tasks: [],
   settings: { weekly_closed: [0, 4], holidays: [], no_delivery: [] },
-  tab: 'calendar', year: now.getFullYear(), month: now.getMonth(), pickDate: '',
+  tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '',
 }
 
 const COLOR: Record<string, string> = {
@@ -36,7 +36,7 @@ const COLOR: Record<string, string> = {
   재연락: 'var(--red)', 마무리문자1: 'var(--gold)', 마무리문자2: 'var(--gold)', 연락대기: 'var(--purple)', 메모: '#718096',
 }
 const TABS: [string, string][] = [
-  ['calendar', '달력'], ['today', '오늘 할 일'], ['weekly', '주간 요약'],
+  ['dashboard', '대시보드'], ['calendar', '달력'], ['today', '오늘 할 일'], ['weekly', '주간 요약'],
   ['patients', '환자'], ['uncontactable', '연락 안 됨'], ['stats', '통계'], ['settings', '설정'],
 ]
 
@@ -120,13 +120,55 @@ function render(): void {
     <main id="view"></main>
     <div id="modal"></div>`
   const view = root.querySelector('#view') as HTMLElement
-  if (state.tab === 'calendar') renderCalendar(view)
+  if (state.tab === 'dashboard') renderDashboard(view)
+  else if (state.tab === 'calendar') renderCalendar(view)
   else if (state.tab === 'today') renderToday(view)
   else if (state.tab === 'weekly') renderWeekly(view)
   else if (state.tab === 'patients') renderPatients(view)
   else if (state.tab === 'uncontactable') renderUncontactable(view)
   else if (state.tab === 'stats') renderStats(view)
   else if (state.tab === 'settings') renderSettings(view)
+}
+
+// ---------- 대시보드 (오늘 한눈에) ----------
+function renderDashboard(view: HTMLElement): void {
+  const today = todayStr()
+  const active = state.tasks.filter((t) => t.status === '예정')
+  const todayTasks = active.filter((t) => t.due_on === today)
+  const overdue = active.filter((t) => t.due_on < today)
+  const cnt = (arr: Task[], k: string): number => arr.filter((t) => t.kind === k).length
+  // 이번 주(월~일) 처방 나간 환자 수
+  const d = new Date(); const day = d.getDay(); const monday = new Date(d); monday.setDate(d.getDate() - ((day + 6) % 7))
+  const weekDates: string[] = []
+  for (let i = 0; i < 7; i++) { const c = new Date(monday); c.setDate(monday.getDate() + i); weekDates.push(`${c.getFullYear()}-${String(c.getMonth() + 1).padStart(2, '0')}-${String(c.getDate()).padStart(2, '0')}`) }
+  const weekRx = new Set(state.tasks.filter((t) => (t.kind === '처방문자' || t.kind === '처방') && weekDates.includes(t.due_on)).map((t) => t.patient_id)).size
+  // 연락 안 됨·재연락·대기
+  const uncontact = state.tasks.filter((t) => (t.kind === '재연락' || t.kind === '연락대기') && t.status === '예정').sort((a, b) => a.due_on.localeCompare(b.due_on))
+  // 완주 임박(현재 블록 남은 처방 1회 이하)
+  const nearDone: { p: Patient; prog: string }[] = []
+  for (const p of state.patients) {
+    const blk = latestBlock(p.id); if (!blk) continue
+    const inb = rxInBlock(blk.id).length
+    if (inb >= blk.x - 1 && inb <= blk.x) nearDone.push({ p, prog: `${blk.x}-${inb}` })
+  }
+  const stat = (label: string, n: number, red = false): string =>
+    `<div class="card" style="text-align:center;min-width:90px${red ? ';border-color:var(--red)' : ''}">${label}<div style="font-size:22px;font-weight:700${red ? ';color:var(--red)' : ''}">${n}</div></div>`
+  view.innerHTML = `
+    <h3>오늘 (${today})</h3>
+    <div class="row">
+      ${stat('처방·문자', cnt(todayTasks, '처방문자'))}
+      ${stat('확인전화', cnt(todayTasks, '확인전화'))}
+      ${stat('문진예정', cnt(todayTasks, '문진예정'))}
+      ${stat('재연락', cnt(todayTasks, '재연락'))}
+      ${stat('마무리문자', cnt(todayTasks, '마무리문자1') + cnt(todayTasks, '마무리문자2'))}
+      ${stat('지난(놓친)', overdue.length, true)}
+    </div>
+    <h3>연락 안 됨 · 재연락 · 대기 (${uncontact.length})</h3>
+    ${uncontact.length ? uncontact.map((t) => `<div class="task"><span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}</div>`).join('') : '<p class="muted">없음</p>'}
+    <h3>이번 주 처방 나간 환자 수: <b>${weekRx}</b></h3>
+    <h3>완주 임박 (마지막 회차 다가옴)</h3>
+    ${nearDone.length ? nearDone.map((x) => `<div class="task"><b>${displayName(x.p)}</b> <span class="muted">${x.prog}</span></div>`).join('') : '<p class="muted">없음</p>'}
+    <p class="muted">보는 사람: 원장·데스크 간호사. 오늘 전화·문진할 사람을 여기서 바로 고릅니다.</p>`
 }
 
 // ---------- 달력 ----------
