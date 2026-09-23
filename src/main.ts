@@ -4,11 +4,11 @@ import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
-  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw,
+  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
-import { isClinicClosed, isHoliday } from './holidays'
+import { isClinicClosed, isHoliday, holidayName, dow } from './holidays'
 
 // ---------- 상태 ----------
 interface State {
@@ -32,7 +32,7 @@ const state: State = {
 
 const COLOR: Record<string, string> = {
   처방문자: 'var(--brown)', 처방: 'var(--brown)', 문자: 'var(--brown)', 확인전화: 'var(--blue)', 문진예정: 'var(--green)',
-  재연락: 'var(--red)', 마무리문자1: 'var(--gold)', 마무리문자2: 'var(--gold)', 연락대기: 'var(--purple)',
+  재연락: 'var(--red)', 마무리문자1: 'var(--gold)', 마무리문자2: 'var(--gold)', 연락대기: 'var(--purple)', 메모: '#718096',
 }
 const TABS: [string, string][] = [
   ['calendar', '달력'], ['today', '오늘 할 일'], ['weekly', '주간 요약'],
@@ -146,11 +146,11 @@ function renderCalendar(view: HTMLElement): void {
       return `<span class="chip" style="background:${bg}"${done ? ' title="완료"' : ''}>${done ? '✓ ' : ''}${t.label}</span>`
     }).join('')
     const closed = isClinicClosed(ds, state.settings)
-    const hol = isHoliday(ds, state.settings)
+    const hn = holidayName(ds, state.settings)
     const noDel = state.settings.no_delivery.includes(ds)
     const count = dayTasks.length > 6 ? `<span class="cellcount">${dayTasks.length}건 · 스크롤 ↕</span>` : ''
     cells.push(`<td class="${closed ? 'closed' : ''} ${ds === todayStr() ? 'today' : ''}" data-action="pickDay" data-date="${ds}">
-      <div class="daynum">${d}${hol ? ' <span class="holiday">공휴일</span>' : ''}${noDel ? ' <span class="holiday">택배불가</span>' : ''} ${count}</div>
+      <div class="daynum">${d}${hn ? ` <span class="holiday">${hn}</span>` : ''}${noDel ? ' <span class="holiday">택배불가</span>' : ''} ${count}</div>
       <div class="cellbox">${chips}</div></td>`)
   }
   const rows: string[] = []
@@ -329,49 +329,57 @@ function openDayModal(ds: string): void {
   const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
   const dayList = dayTasks.length
     ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
-       <div class="row"><b>이 날 일정</b><button class="btn" data-action="selectAllDay">전체 선택</button><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">전체 선택 후 한 번에 삭제 가능</span></div>` +
+       <div class="row"><b>이 날 일정</b><button class="btn" data-action="selectAllDay">전체 선택</button><button class="btn primary" data-action="completeSelected" data-date="${ds}">선택 완료</button><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">체크해서 한 번에 완료·삭제</span></div>` +
       dayTasks.map((t) => `<div class="task">
         <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b></label>
         <div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
     : ''
+  // 일요일·공휴일은 원외탕전 휴무 → 처방 없이 메모만
+  const blocked = dow(ds) === 0 || isHoliday(ds, state.settings)
+  const topSection = blocked
+    ? `<p class="muted">${holidayName(ds, state.settings) ?? '일요일'} — 원외탕전 휴무라 처방이 나가지 않습니다. 메모만 남길 수 있어요.</p>
+       <div class="row">
+         <input id="m-memo" placeholder="메모 (예: 연휴 안내)" style="width:230px">
+         <button class="btn primary" data-action="saveMemo" data-date="${ds}">메모 저장</button>
+         <button class="btn" data-action="closeModal">닫기</button>
+       </div>`
+    : `<div class="row">
+         <input id="m-name" list="patlist" placeholder="환자 이름" style="width:150px" autocomplete="off">
+         <datalist id="patlist">${datalist}</datalist>
+         <input id="m-birth" style="width:100px" placeholder="생년(동명이인만)">
+         <input id="m-num" style="width:70px" placeholder="번호">
+         <button class="btn primary" data-action="rxSmart">처방 나감</button>
+       </div>
+       <div class="row" style="margin-top:6px">
+         <span class="muted">새 환자·새 결제일 때만 →</span>
+         <select id="m-region"><option>서울</option><option>지방</option><option>해외</option></select>
+         <select id="m-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
+         <label style="font-size:13px"><input type="checkbox" id="m-first"> 한약 초진</label>
+         <button class="btn" data-action="closeModal">닫기</button>
+       </div>
+       <p class="muted" style="margin-top:6px">이름을 치면 기존 환자가 자동완성됩니다. 이어서 처방하면 다음 번호로, 약을 다 먹은 환자는 개월수를 골라 새 결제(4-1 등)로 이어집니다. 없는 이름은 새 환자로 등록됩니다. 번호는 자동으로 채워지고 고칠 수 있습니다.</p>`
   modal.className = 'open'
-  modal.innerHTML = `<div class="modal-box">
-    <h3>${ds} — 처방 입력</h3>
-    <div class="row">
-      <input id="m-name" list="patlist" placeholder="환자 이름" style="width:150px" autocomplete="off">
-      <datalist id="patlist">${datalist}</datalist>
-      <input id="m-birth" style="width:100px" placeholder="생년(동명이인만)">
-      <input id="m-num" style="width:70px" placeholder="번호">
-      <button class="btn primary" data-action="rxSmart">처방 나감</button>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <span class="muted">새 환자·새 결제일 때만 →</span>
-      <select id="m-region"><option>서울</option><option>지방</option><option>해외</option></select>
-      <select id="m-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
-      <label style="font-size:13px"><input type="checkbox" id="m-first"> 한약 초진</label>
-      <button class="btn" data-action="closeModal">닫기</button>
-    </div>
-    <p class="muted" style="margin-top:6px">이름을 치면 기존 환자가 자동완성됩니다. 이어서 처방하면 다음 번호(2-2 등)로, 약을 다 먹은 환자는 개월수를 골라 처방하면 새 결제(4-1 등)로 이어집니다. 없는 이름은 새 환자로 등록됩니다. 번호는 자동으로 채워지고 고칠 수 있습니다.</p>
-    ${dayList}
-  </div>`
-  // 번호 자동완성
-  const nameEl = document.getElementById('m-name') as HTMLInputElement
-  const birthEl = document.getElementById('m-birth') as HTMLInputElement
-  const numEl = document.getElementById('m-num') as HTMLInputElement
-  const monEl = document.getElementById('m-months') as HTMLSelectElement
-  const refresh = (): void => {
-    const disp = birthEl.value.trim() ? `${nameEl.value.trim()}(${birthEl.value.trim()})` : nameEl.value.trim()
-    const ex = state.patients.find((p) => displayName(p) === disp)
-    if (ex) {
-      const blk = latestBlock(ex.id)
-      numEl.value = (blk && rxInBlock(blk.id).length < blk.x) ? suggestNumber(ex.id) : `${Number(monEl.value) * 2}-1`
-    } else {
-      numEl.value = `${Number(monEl.value) * 2}-1`
+  modal.innerHTML = `<div class="modal-box"><h3>${ds} — ${blocked ? '메모' : '처방 입력'}</h3>${topSection}${dayList}</div>`
+  if (!blocked) {
+    // 번호 자동완성
+    const nameEl = document.getElementById('m-name') as HTMLInputElement
+    const birthEl = document.getElementById('m-birth') as HTMLInputElement
+    const numEl = document.getElementById('m-num') as HTMLInputElement
+    const monEl = document.getElementById('m-months') as HTMLSelectElement
+    const refresh = (): void => {
+      const disp = birthEl.value.trim() ? `${nameEl.value.trim()}(${birthEl.value.trim()})` : nameEl.value.trim()
+      const ex = state.patients.find((p) => displayName(p) === disp)
+      if (ex) {
+        const blk = latestBlock(ex.id)
+        numEl.value = (blk && rxInBlock(blk.id).length < blk.x) ? suggestNumber(ex.id) : `${Number(monEl.value) * 2}-1`
+      } else {
+        numEl.value = `${Number(monEl.value) * 2}-1`
+      }
     }
+    nameEl.addEventListener('input', refresh)
+    birthEl.addEventListener('input', refresh)
+    monEl.addEventListener('change', refresh)
   }
-  nameEl.addEventListener('input', refresh)
-  birthEl.addEventListener('input', refresh)
-  monEl.addEventListener('change', refresh)
 }
 function closeModal(): void {
   const modal = document.getElementById('modal') as HTMLElement
@@ -501,6 +509,20 @@ async function handleClick(e: Event): Promise<void> {
     const allChecked = boxes.length > 0 && boxes.every((b) => b.checked)
     boxes.forEach((b) => { b.checked = !allChecked })
     return
+  }
+  if (action === 'saveMemo') {
+    const ds = el.getAttribute('data-date')!
+    const text = (document.getElementById('m-memo') as HTMLInputElement).value.trim()
+    if (!text) { alert('메모를 입력하세요.'); return }
+    await insertMemo(ds, text)
+    await reload(); openDayModal(ds); return
+  }
+  if (action === 'completeSelected') {
+    const ds = el.getAttribute('data-date')!
+    const ids = Array.from(document.querySelectorAll('.m-del:checked')).map((c) => (c as HTMLElement).getAttribute('data-id')!)
+    if (!ids.length) { alert('완료할 항목을 체크하세요.'); return }
+    for (const tid of ids) await updateTask(tid, { status: '완료' })
+    await reload(); openDayModal(ds); return
   }
   if (action === 'delSelected') {
     const ds = el.getAttribute('data-date')!

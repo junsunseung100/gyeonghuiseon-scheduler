@@ -71,6 +71,12 @@ export async function insertTasks(ts: Omit<Task, 'id'>[]): Promise<void> {
   const { error } = await sb.from('tasks').insert(ts)
   if (error) throw error
 }
+export async function insertMemo(due_on: string, text: string): Promise<void> {
+  const { error } = await sb.from('tasks').insert({
+    patient_id: null, prescription_id: null, kind: '메모', label: text, due_on, status: '예정', attempt: 0, note: '',
+  })
+  if (error) throw error
+}
 export async function updateTask(id: string, patch: Partial<Task>): Promise<void> {
   const { error } = await sb.from('tasks').update(patch).eq('id', id)
   if (error) throw error
