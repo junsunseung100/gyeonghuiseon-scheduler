@@ -23,7 +23,12 @@
       input, select { font-family:inherit; font-size:14px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; }
       .chip { display:inline-block; font-size:11px; padding:1px 6px; border-radius:6px; color:#fff; margin:1px; }
       table.cal { width:100%; border-collapse:collapse; table-layout:fixed; }
+      table.cal th:first-child, table.cal td:first-child { width:7%; }
       table.cal th { font-size:12px; color:#718096; padding:4px; }
+      .today3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; align-items:start; }
+      .today3 .todaycol { min-width:0; }
+      .today3 h3 { margin:0 0 8px; }
+      @media (max-width:700px) { .today3 { grid-template-columns:1fr; } }
       table.cal td { border:1px solid var(--line); vertical-align:top; height:184px; width:14.2%; padding:3px; font-size:12px; cursor:pointer; }
       table.cal td:hover { background:#eef6ff; }
       td.closed { background:#f1f1f4; }

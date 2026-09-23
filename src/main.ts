@@ -9,6 +9,7 @@ import {
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
 import { isClinicClosed, isHoliday, holidayName, dow } from './holidays'
+import { addDays } from './dates'
 
 // ---------- 상태 ----------
 interface State {
@@ -194,10 +195,13 @@ function renderToday(view: HTMLElement): void {
   const now2 = open.filter((t) => t.due_on === today)
   const soonMax = (() => { const d = new Date(); d.setDate(d.getDate() + 4); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })()
   const soon = open.filter((t) => t.due_on > today && t.due_on <= soonMax).sort((a, b) => a.due_on.localeCompare(b.due_on))
-  view.innerHTML = `
-    <h3>지난 일 (놓친 것)</h3>${past.length ? past.map((t) => taskLine(t, true)).join('') : '<p class="muted">없음</p>'}
-    <h3>오늘</h3>${now2.length ? now2.map((t) => taskLine(t, false)).join('') : '<p class="muted">없음</p>'}
-    <h3>다가오는 4일</h3>${soon.length ? soon.map((t) => taskLine(t, false)).join('') : '<p class="muted">없음</p>'}`
+  const col = (title: string, arr: Task[], overdue: boolean): string =>
+    `<div class="todaycol"><h3>${title}</h3>${arr.length ? arr.map((t) => taskLine(t, overdue)).join('') : '<p class="muted">없음</p>'}</div>`
+  view.innerHTML = `<div class="today3">
+    ${col('지난 일 (놓친 것)', past, true)}
+    ${col('오늘', now2, false)}
+    ${col('다가오는 4일', soon, false)}
+  </div>`
 }
 
 // ---------- 주간 요약 (처방 나간 날만, 요일별) ----------
@@ -313,7 +317,20 @@ async function createRx(p: Patient, blk: Block, date: string, numberStr?: string
   if (mt) y = Number(mt[1]) // 직접 적은 번호의 Y를 저장
   const overall = state.prescriptions.filter((r) => r.patient_id === p.id).length + 1
   const rx = await insertPrescription({ block_id: blk.id, patient_id: p.id, y, overall, prescribed_on: date })
-  await insertTasks(buildTasksForPrescription(p, rx, blk.x, state.settings, numberStr))
+  const newTasks = buildTasksForPrescription(p, rx, blk.x, state.settings, numberStr)
+  // 토요일 문진예정이 최대(기본 3)를 넘으면 금요일로 당김
+  const maxSat = state.settings.max_saturday ?? 3
+  const fu = newTasks.find((t) => t.kind === '문진예정')
+  if (fu && dow(fu.due_on) === 6) {
+    const cnt = state.tasks.filter((t) => t.kind === '문진예정' && t.due_on === fu.due_on && t.status === '예정').length
+    if (cnt >= maxSat) {
+      let cur = addDays(fu.due_on, -1)
+      while (isClinicClosed(cur, state.settings)) cur = addDays(cur, -1)
+      fu.due_on = cur
+      fu.note = fu.note ? `${fu.note} · 토요일 많아 당김` : '토요일 많아 당김'
+    }
+  }
+  await insertTasks(newTasks)
 }
 async function registerPatient(name: string, region: Region, months: 1 | 2 | 3, birth: string, firstHerbal: boolean): Promise<{ p: Patient; blk: Block }> {
   const p = await insertPatient({ name, region, birth, first_herbal: firstHerbal })
