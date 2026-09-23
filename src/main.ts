@@ -250,7 +250,9 @@ function taskActions(t: Task): string {
       const body = t.kind === '처방문자'
         ? '안녕하세요, 경희선한의원입니다. 한약이 곧 도착 예정입니다. 받으시면 확인 부탁드립니다.'
         : '안녕하세요, 경희선한의원입니다. 그동안 어떠셨는지요? 궁금한 점 있으시면 연락 주세요.'
-      btns.push(`<a class="btn primary" href="sms:${pt.phone.replace(/[^0-9]/g, '')}?body=${encodeURIComponent(body)}">문자 보내기</a>`)
+      btns.push(`<a class="btn primary" href="sms:${pt.phone.replace(/[^0-9]/g, '')}?body=${encodeURIComponent(body)}">📩 문자 보내기</a>`)
+    } else {
+      btns.push('<span class="muted" style="font-size:11px">전화번호 없음(환자 탭에서 저장)</span>')
     }
   }
   if ((t.kind === '처방문자' || t.kind === '처방') && t.prescription_id) btns.push(`<button class="btn" data-action="delRx" data-id="${t.prescription_id}">이 회차 전체 삭제</button>`)
