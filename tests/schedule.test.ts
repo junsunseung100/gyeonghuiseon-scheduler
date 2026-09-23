@@ -9,24 +9,27 @@ function rx(y: number, on: string): Prescription {
   return { id: 'r1', block_id: 'b1', patient_id: 'p1', y, overall: y, prescribed_on: on }
 }
 
-test('중간 회차: 처방·문자 / 확인전화(같은 번호) / 문진예정(다음 번호)', () => {
+test('중간 회차: 처방문자(한 항목) / 확인전화(같은 번호) / 문진예정(다음 번호)', () => {
   const tasks = buildTasksForPrescription(kim, rx(1, '2026-09-08'), 6, s)
   const kinds = tasks.map((t) => t.kind)
-  expect(kinds).toEqual(['처방', '문자', '확인전화', '문진예정'])
+  expect(kinds).toEqual(['처방문자', '확인전화', '문진예정'])
+  const pm = tasks.find((t) => t.kind === '처방문자')!
   const call = tasks.find((t) => t.kind === '확인전화')!
   const followup = tasks.find((t) => t.kind === '문진예정')!
+  expect(pm.label).toContain('6-1')
+  expect(pm.label).toContain('처방·문자')
   expect(call.label).toContain('6-1')
   expect(call.due_on).toBe('2026-09-09')
   expect(followup.label).toContain('6-2') // 다음 번호
   expect(followup.due_on).toBe('2026-09-19')
 })
 
-test('목요일 처방이면 문자는 전날(수)로', () => {
-  // 09-10(목) 처방 → 문자 due_on = 09-09(수)
+test('목요일 처방이면 처방문자는 전날(수)로 미리 예약', () => {
+  // 09-10(목) 처방 → 처방문자 due_on = 09-09(수)
   const tasks = buildTasksForPrescription(kim, rx(2, '2026-09-10'), 6, s)
-  const msg = tasks.find((t) => t.kind === '문자')!
-  expect(msg.due_on).toBe('2026-09-09')
-  expect(msg.note).toBe('미리 예약')
+  const pm = tasks.find((t) => t.kind === '처방문자')!
+  expect(pm.due_on).toBe('2026-09-09')
+  expect(pm.note).toBe('미리 예약')
 })
 
 test('마지막 회차(y===x)는 문진예정 대신 마무리문자 1·2', () => {

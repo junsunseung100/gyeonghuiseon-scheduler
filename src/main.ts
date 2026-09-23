@@ -31,7 +31,7 @@ const state: State = {
 }
 
 const COLOR: Record<string, string> = {
-  처방: 'var(--brown)', 문자: 'var(--brown)', 확인전화: 'var(--blue)', 문진예정: 'var(--green)',
+  처방문자: 'var(--brown)', 처방: 'var(--brown)', 문자: 'var(--brown)', 확인전화: 'var(--blue)', 문진예정: 'var(--green)',
   재연락: 'var(--red)', 마무리문자1: 'var(--gold)', 마무리문자2: 'var(--gold)', 연락대기: 'var(--purple)',
 }
 const TABS: [string, string][] = [
@@ -138,18 +138,17 @@ function renderCalendar(view: HTMLElement): void {
   for (let i = 0; i < startDow; i++) cells.push('<td></td>')
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
-    // 같은 처방의 처방+문자가 같은 날이면 한 줄로 합침: "김나나 6-1 처방 문자"
-    const shown = dayTasks.filter((t) => !(t.kind === '문자' && dayTasks.some((o) => o.kind === '처방' && o.prescription_id === t.prescription_id)))
-    const chips = shown.map((t) => {
-      let label = t.label
-      if (t.kind === '처방' && dayTasks.some((o) => o.kind === '문자' && o.prescription_id === t.prescription_id)) label = `${t.label} 문자`
-      return `<span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${label}</span>`
+    // 완료도 회색으로 남긴다(기록 유지). 취소·연락안됨(대체됨)은 숨김.
+    const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '취소' && t.status !== '연락안됨')
+    const chips = dayTasks.map((t) => {
+      const done = t.status === '완료'
+      const bg = done ? '#a0aec0' : (COLOR[t.kind] ?? '#888')
+      return `<span class="chip" style="background:${bg}"${done ? ' title="완료"' : ''}>${done ? '✓ ' : ''}${t.label}</span>`
     }).join('')
     const closed = isClinicClosed(ds, state.settings)
     const hol = isHoliday(ds, state.settings)
     const noDel = state.settings.no_delivery.includes(ds)
-    const count = shown.length > 6 ? `<span class="cellcount">${shown.length}건 · 스크롤 ↕</span>` : ''
+    const count = dayTasks.length > 6 ? `<span class="cellcount">${dayTasks.length}건 · 스크롤 ↕</span>` : ''
     cells.push(`<td class="${closed ? 'closed' : ''} ${ds === todayStr() ? 'today' : ''}" data-action="pickDay" data-date="${ds}">
       <div class="daynum">${d}${hol ? ' <span class="holiday">공휴일</span>' : ''}${noDel ? ' <span class="holiday">택배불가</span>' : ''} ${count}</div>
       <div class="cellbox">${chips}</div></td>`)
@@ -178,7 +177,7 @@ function taskActions(t: Task): string {
     btns.push(`<button class="btn" data-action="willcall" data-id="${t.id}">환자가 연락 주기로</button>`)
   }
   if (t.kind === '마무리문자1') btns.push(`<button class="btn" data-action="visited" data-id="${t.id}">내원함(2차 취소)</button>`)
-  if (t.kind === '처방' && t.prescription_id) btns.push(`<button class="btn" data-action="delRx" data-id="${t.prescription_id}">이 회차 전체 삭제</button>`)
+  if ((t.kind === '처방문자' || t.kind === '처방') && t.prescription_id) btns.push(`<button class="btn" data-action="delRx" data-id="${t.prescription_id}">이 회차 전체 삭제</button>`)
   btns.push(`<button class="btn" data-action="delTask" data-id="${t.id}">삭제</button>`)
   return btns.join('')
 }
@@ -211,8 +210,8 @@ function renderWeekly(view: HTMLElement): void {
   for (let i = 0; i < 7; i++) {
     const cur = new Date(monday); cur.setDate(monday.getDate() + i)
     const ds = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`
-    const rx = state.tasks.filter((t) => t.kind === '처방' && t.due_on === ds)
-    const who = rx.map((t) => t.label.replace(' 처방', '')).join(', ')
+    const rx = state.tasks.filter((t) => (t.kind === '처방문자' || t.kind === '처방') && t.due_on === ds)
+    const who = rx.map((t) => t.label.replace(/ 처방(·문자)?$/, '')).join(', ')
     rows.push(`<div class="card"><b>${names[i]} (${ds})</b><div>${who || '<span class="muted">처방 없음</span>'}</div></div>`)
   }
   view.innerHTML = `<h3>이번 주 처방 나간 환자</h3>${rows.join('')}`

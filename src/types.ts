@@ -1,7 +1,7 @@
 export type Region = '서울' | '지방' | '해외'
 
 export type TaskKind =
-  | '처방' | '문자' | '확인전화' | '문진예정'
+  | '처방문자' | '처방' | '문자' | '확인전화' | '문진예정'
   | '재연락' | '마무리문자1' | '마무리문자2' | '연락대기'
 
 export type TaskStatus = '예정' | '완료' | '연락안됨' | '대기' | '취소'
@@ -12,6 +12,7 @@ export interface Patient {
   region: Region // 서울/지방/해외 (지방·해외는 배지)
   birth?: string // 생년 또는 생년월일 (동명이인 구분용, 선택)
   first_herbal?: boolean // 한약 초진 여부
+  phone?: string // 전화번호 (문자 보내기용, 선택)
 }
 
 export interface Block {
@@ -47,4 +48,6 @@ export interface Settings {
   weekly_closed: number[] // 요일 휴진 [0=일,4=목]
   holidays: string[] // 법정공휴일 YYYY-MM-DD
   no_delivery: string[] // 원외탕전 택배 불가일 YYYY-MM-DD
+  pin?: string // 4자리 PIN (빠른 로그인)
+  max_saturday?: number // 토요일 문진예정 최대 (기본 3)
 }
