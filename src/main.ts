@@ -235,7 +235,17 @@ function renderCalendar(view: HTMLElement): void {
 }
 
 // ---------- 오늘 할 일 ----------
+// 문자 종류별 미리 채울 내용
+function smsBody(kind: string): string {
+  return kind === '처방문자'
+    ? '안녕하세요, 경희선한의원입니다. 한약이 곧 도착 예정입니다. 받으시면 확인 부탁드립니다.'
+    : '안녕하세요, 경희선한의원입니다. 그동안 어떠셨는지요? 궁금한 점 있으시면 연락 주세요.'
+}
 function taskActions(t: Task): string {
+  // 완료된 항목: 되돌리기(완료 취소)와 삭제만
+  if (t.status === '완료') {
+    return `<button class="btn primary" data-action="uncomplete" data-id="${t.id}">완료 취소(되돌리기)</button><button class="btn" data-action="delTask" data-id="${t.id}">삭제</button>`
+  }
   const btns: string[] = [`<button class="btn primary" data-action="done" data-id="${t.id}">완료</button>`,
     `<button class="btn" data-action="move" data-id="${t.id}">날짜변경</button>`]
   if (t.kind === '문진예정' || t.kind === '재연락') {
@@ -243,16 +253,14 @@ function taskActions(t: Task): string {
     btns.push(`<button class="btn" data-action="willcall" data-id="${t.id}">환자가 연락 주기로</button>`)
   }
   if (t.kind === '마무리문자1') btns.push(`<button class="btn" data-action="visited" data-id="${t.id}">내원함(2차 취소)</button>`)
-  // 문자 보내기: 전화번호가 있으면 문자 앱을 미리 채워 연다
+  // 문자 보내기: 전화번호가 있으면 문자 앱을 미리 채워 열고, 없으면 바로 여기서 저장
   if (t.kind === '처방문자' || t.kind === '마무리문자1' || t.kind === '마무리문자2') {
     const pt = t.patient_id ? patientById(t.patient_id) : undefined
     if (pt && pt.phone) {
-      const body = t.kind === '처방문자'
-        ? '안녕하세요, 경희선한의원입니다. 한약이 곧 도착 예정입니다. 받으시면 확인 부탁드립니다.'
-        : '안녕하세요, 경희선한의원입니다. 그동안 어떠셨는지요? 궁금한 점 있으시면 연락 주세요.'
+      const body = smsBody(t.kind)
       btns.push(`<button class="btn primary" data-action="sms" data-phone="${pt.phone.replace(/[^0-9]/g, '')}" data-body="${body}">📩 문자 보내기</button>`)
-    } else {
-      btns.push('<span class="muted" style="font-size:11px">전화번호 없음(환자 탭에서 저장)</span>')
+    } else if (pt) {
+      btns.push(`<input id="ph2-${pt.id}" placeholder="전화번호 입력" style="width:120px"><button class="btn" data-action="setPhoneInline" data-id="${pt.id}">전화 저장</button>`)
     }
   }
   if ((t.kind === '처방문자' || t.kind === '처방') && t.prescription_id) btns.push(`<button class="btn" data-action="delRx" data-id="${t.prescription_id}">이 회차 전체 삭제</button>`)
@@ -428,12 +436,12 @@ function openDayModal(ds: string): void {
   state.pickDate = ds
   const modal = document.getElementById('modal') as HTMLElement
   const datalist = state.patients.map((p) => `<option value="${displayName(p)}">`).join('')
-  const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '완료' && t.status !== '취소' && t.status !== '연락안됨')
+  const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '취소' && t.status !== '연락안됨')
   const dayList = dayTasks.length
     ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
-       <div class="row"><b>이 날 일정</b><button class="btn" data-action="selectAllDay">전체 선택</button><button class="btn primary" data-action="completeSelected" data-date="${ds}">선택 완료</button><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">체크해서 한 번에 완료·삭제</span></div>` +
-      dayTasks.map((t) => `<div class="task">
-        <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b></label>
+       <div class="row"><b>이 날 일정</b><button class="btn" data-action="selectAllDay">전체 선택</button><button class="btn primary" data-action="completeSelected" data-date="${ds}">선택 완료</button><button class="btn" data-action="smsSelected">📩 선택 문자</button><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">체크해서 한 번에 완료·문자·삭제</span></div>` +
+      dayTasks.map((t) => `<div class="task" style="${t.status === '완료' ? 'opacity:.55;background:#f1f1f4' : ''}">
+        <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b>${t.status === '완료' ? ' <span class="muted">✓ 완료</span>' : ''}</label>
         <div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
     : ''
   // 일요일·공휴일은 원외탕전 휴무 → 처방 없이 메모만
@@ -660,6 +668,45 @@ async function handleClick(e: Event): Promise<void> {
     for (const tid of ids) await deleteTask(tid)
     await reload()
     openDayModal(ds) // 팝업 유지(갱신)
+    return
+  }
+  // 여러 명 한 번에 문자: 체크한 항목들의 환자 번호를 모아 문자 앱을 연다
+  if (action === 'smsSelected') {
+    const ids = Array.from(document.querySelectorAll('.m-del:checked')).map((c) => (c as HTMLElement).getAttribute('data-id')!)
+    if (!ids.length) { alert('문자 보낼 항목을 체크하세요.'); return }
+    const picked = state.tasks.filter((x) => ids.includes(x.id))
+    const phones: string[] = []
+    const noPhone: string[] = []
+    for (const tk of picked) {
+      const pt = tk.patient_id ? patientById(tk.patient_id) : undefined
+      if (pt && pt.phone) phones.push(pt.phone.replace(/[^0-9]/g, ''))
+      else noPhone.push(tk.label)
+    }
+    if (!phones.length) { alert('선택한 항목에 저장된 전화번호가 없습니다. 먼저 전화번호를 저장하세요.'); return }
+    const body = smsBody(picked[0].kind)
+    try { await navigator.clipboard.writeText(body) } catch { /* 클립보드 불가 무시 */ }
+    const a = document.createElement('a')
+    a.href = `sms:${phones.join(',')}?body=${encodeURIComponent(body)}`
+    a.click()
+    if (noPhone.length) alert('전화번호가 없어 제외됨: ' + noPhone.join(', '))
+    return
+  }
+  // 실수로 누른 완료 되돌리기
+  if (action === 'uncomplete') {
+    await updateTask(id, { status: '예정' })
+    await reload()
+    const modalOpen = (document.getElementById('modal') as HTMLElement).className === 'open'
+    if (modalOpen && state.pickDate) openDayModal(state.pickDate)
+    return
+  }
+  // 팝업 안에서 바로 전화번호 저장(환자 탭으로 안 넘어가도 됨)
+  if (action === 'setPhoneInline') {
+    const inp = document.getElementById(`ph2-${id}`) as HTMLInputElement | null
+    const phone = inp ? inp.value.trim() : ''
+    if (!phone) { alert('전화번호를 입력하세요.'); return }
+    await updatePatient(id, { phone })
+    await reload()
+    if (state.pickDate) openDayModal(state.pickDate)
     return
   }
 
