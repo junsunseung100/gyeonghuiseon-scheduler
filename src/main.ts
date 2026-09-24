@@ -4,7 +4,7 @@ import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
-  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient,
+  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient, signInAnon,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
@@ -723,8 +723,14 @@ onAuth(async (user) => {
   if (user) await reload()
   else render()
 })
-currentUser().then(async (user) => {
+async function boot(): Promise<void> {
+  let user = await currentUser()
+  if (!user) {
+    // 이메일·비번 없이 익명 세션으로 접속(실패하면 로그인 화면 fallback)
+    try { await signInAnon(); user = await currentUser() } catch (e) { /* 익명 미허용 등 */ }
+  }
   state.user = user
   if (user) await reload()
   else render()
-})
+}
+void boot()

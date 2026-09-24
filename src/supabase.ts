@@ -14,6 +14,11 @@ export async function signIn(email: string, password: string): Promise<void> {
 export async function signOut(): Promise<void> {
   await sb.auth.signOut()
 }
+// PIN 전용: 비밀번호 없이 익명 세션으로 접속(실제 접근 제어는 앱의 PIN)
+export async function signInAnon(): Promise<void> {
+  const { error } = await sb.auth.signInAnonymously()
+  if (error) throw error
+}
 export async function currentUser(): Promise<User | null> {
   const { data } = await sb.auth.getUser()
   return data.user
