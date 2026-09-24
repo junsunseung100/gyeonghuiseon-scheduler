@@ -24,12 +24,13 @@ test('중간 회차: 처방문자(한 항목) / 확인전화(같은 번호) / �
   expect(followup.due_on).toBe('2026-09-19')
 })
 
-test('목요일 처방이면 처방문자는 전날(수)로 미리 예약', () => {
-  // 09-10(목) 처방 → 처방문자 due_on = 09-09(수)
+test('목요일 처방이어도 처방문자는 그날(목)에 그대로', () => {
+  // 09-10(목) 처방 → 처방문자 due_on = 09-10(목), 확인전화는 다음날 금요일
   const tasks = buildTasksForPrescription(kim, rx(2, '2026-09-10'), 6, s)
   const pm = tasks.find((t) => t.kind === '처방문자')!
-  expect(pm.due_on).toBe('2026-09-09')
-  expect(pm.note).toBe('미리 예약')
+  expect(pm.due_on).toBe('2026-09-10')
+  const call = tasks.find((t) => t.kind === '확인전화')!
+  expect(call.due_on).toBe('2026-09-11') // 금
 })
 
 test('마지막 회차(y===x)는 문진예정 대신 마무리문자 1·2', () => {

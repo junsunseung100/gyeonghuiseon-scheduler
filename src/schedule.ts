@@ -17,18 +17,10 @@ export function buildTasksForPrescription(p: Patient, rx: Prescription, x: numbe
   const dname = p.birth ? `${p.name}(${p.birth})` : p.name
   const tag = `${dname} ${num(numX, numY)}`
 
-  // 처방·문자 (한 항목). 처방일이 한의원 휴진이면 직전 진료일에 "미리 예약"
-  let due = rx.prescribed_on
-  let note = ''
-  if (isClinicClosed(rx.prescribed_on, s)) {
-    let cur = addDays(rx.prescribed_on, -1)
-    while (isClinicClosed(cur, s)) cur = addDays(cur, -1)
-    due = cur
-    note = '미리 예약'
-  }
+  // 처방·문자 (한 항목) — 처방이 실제로 나가는 날(처방일) 그대로. 목요일도 원외탕전 운영일이라 그날 표시.
   tasks.push({
     patient_id: p.id, prescription_id: rx.id, kind: '처방문자',
-    label: `${tag} 처방·문자`, due_on: due, status: '예정', attempt: 0, note,
+    label: `${tag} 처방·문자`, due_on: rx.prescribed_on, status: '예정', attempt: 0, note: '',
   })
 
   // 확인전화 (+1, 휴진 회피)
