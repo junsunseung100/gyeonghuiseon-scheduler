@@ -250,7 +250,7 @@ function taskActions(t: Task): string {
       const body = t.kind === '처방문자'
         ? '안녕하세요, 경희선한의원입니다. 한약이 곧 도착 예정입니다. 받으시면 확인 부탁드립니다.'
         : '안녕하세요, 경희선한의원입니다. 그동안 어떠셨는지요? 궁금한 점 있으시면 연락 주세요.'
-      btns.push(`<a class="btn primary" href="sms:${pt.phone.replace(/[^0-9]/g, '')}?body=${encodeURIComponent(body)}">📩 문자 보내기</a>`)
+      btns.push(`<button class="btn primary" data-action="sms" data-phone="${pt.phone.replace(/[^0-9]/g, '')}" data-body="${body}">📩 문자 보내기</button>`)
     } else {
       btns.push('<span class="muted" style="font-size:11px">전화번호 없음(환자 탭에서 저장)</span>')
     }
@@ -500,6 +500,16 @@ async function handleClick(e: Event): Promise<void> {
   const id = el.getAttribute('data-id') ?? ''
   const t = state.tasks.find((x) => x.id === id)
 
+  if (action === 'sms') {
+    const phone = el.getAttribute('data-phone') || ''
+    const body = el.getAttribute('data-body') || ''
+    try { await navigator.clipboard.writeText(body) } catch { /* 클립보드 불가 무시 */ }
+    // 핸드폰이면 문자 앱이 열리고, 컴퓨터면 내용만 복사됨
+    const a = document.createElement('a')
+    a.href = `sms:${phone}?body=${encodeURIComponent(body)}`
+    a.click()
+    return
+  }
   if (action === 'pinEnter') { await handlePinEnter(); return }
   if (action === 'setPin') {
     const v = (document.getElementById('pinSet') as HTMLInputElement).value.trim()
