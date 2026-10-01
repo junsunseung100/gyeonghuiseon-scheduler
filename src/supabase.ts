@@ -53,6 +53,7 @@ export async function loadSettings(): Promise<Settings> {
     weekly_closed: (data?.weekly_closed ?? [0, 4]) as number[],
     holidays: (data?.holidays ?? []) as string[],
     no_delivery: (data?.no_delivery ?? []) as string[],
+    colors: (data?.colors ?? undefined) as Record<string, string> | undefined,
   }
 }
 

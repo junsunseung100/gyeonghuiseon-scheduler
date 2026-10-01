@@ -54,6 +54,16 @@
       #modal.open { display:flex; }
       .modal-box { background:#fff; border-radius:12px; padding:18px; width:360px; max-width:92vw; }
       .modal-box h3 { margin:0 0 10px; }
+      /* 압축 달력 항목(색 점 + 글) */
+      table.cal .calchip { display:block; font-size:12px; padding:1px 4px 1px 2px; margin:1px 0; line-height:1.25; white-space:normal; word-break:break-all; border-radius:4px; color:#1a202c; }
+      table.cal .calchip::before { content:""; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--dot,#888); margin-right:5px; vertical-align:middle; }
+      table.cal .calchip.done { color:#a0aec0; text-decoration:line-through; }
+      table.cal .calchip.done::before { background:#a0aec0; }
+      /* 달력 필터 바 */
+      .filterbar { flex-wrap:wrap; gap:4px; align-items:center; }
+      .fchip { display:inline-flex; align-items:center; gap:5px; font-size:12px; padding:3px 8px; }
+      .fchip.off { opacity:.4; text-decoration:line-through; }
+      .fdot { width:9px; height:9px; border-radius:50%; display:inline-block; }
     </style>
   </head>
   <body>

@@ -49,5 +49,6 @@ export interface Settings {
   holidays: string[] // 법정공휴일 YYYY-MM-DD
   no_delivery: string[] // 원외탕전 택배 불가일 YYYY-MM-DD
   pin?: string // 4자리 PIN (빠른 로그인)
-  max_saturday?: number // 토요일 문진예정 최대 (기본 3)
+  max_saturday?: number // (사용 안 함) 과거 토요일 문진 제한
+  colors?: Record<string, string> // 종류별 색 (간호사가 설정에서 변경, 전 기기 공유)
 }

@@ -32,9 +32,24 @@ const state: State = {
   tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', unlocked: false,
 }
 
-const COLOR: Record<string, string> = {
-  처방문자: 'var(--brown)', 처방: 'var(--brown)', 문자: 'var(--brown)', 확인전화: 'var(--blue)', 문진예정: 'var(--green)',
-  재연락: 'var(--red)', 마무리문자1: 'var(--gold)', 마무리문자2: 'var(--gold)', 연락대기: 'var(--purple)', 메모: '#718096',
+// 기본은 차분하게(검정 계열). 간호사가 설정에서 종류별로 색을 바꿀 수 있음(settings.colors).
+const KINDS = ['처방문자', '확인전화', '문진예정', '마무리문자1', '마무리문자2', '재연락', '연락대기', '메모'] as const
+const COLOR_DEFAULT: Record<string, string> = {
+  처방문자: '#2d3748', 처방: '#2d3748', 문자: '#2d3748', 확인전화: '#2d3748', 문진예정: '#2d3748',
+  재연락: '#2d3748', 마무리문자1: '#2d3748', 마무리문자2: '#2d3748', 연락대기: '#2d3748', 메모: '#718096',
+}
+function colorOf(kind: string): string {
+  return state.settings.colors?.[kind] ?? COLOR_DEFAULT[kind] ?? '#2d3748'
+}
+
+// 달력 필터(이 기기에만 저장되는 보기 설정)
+const calFilter: { hidden: Set<string>; hideDone: boolean } = { hidden: new Set(), hideDone: false }
+try {
+  const raw = localStorage.getItem('calFilter')
+  if (raw) { const o = JSON.parse(raw); calFilter.hidden = new Set(o.hidden ?? []); calFilter.hideDone = !!o.hideDone }
+} catch { /* localStorage 불가 무시 */ }
+function saveCalFilter(): void {
+  try { localStorage.setItem('calFilter', JSON.stringify({ hidden: [...calFilter.hidden], hideDone: calFilter.hideDone })) } catch { /* 무시 */ }
 }
 const TABS: [string, string][] = [
   ['dashboard', '대시보드'], ['calendar', '달력'], ['today', '오늘 할 일'], ['weekly', '주간 요약'],
@@ -187,7 +202,7 @@ function renderDashboard(view: HTMLElement): void {
       ${stat('지난(놓친)', overdue.length, true)}
     </div>
     <h3>연락 안 됨 · 재연락 · 대기 (${uncontact.length})</h3>
-    ${uncontact.length ? uncontact.map((t) => `<div class="task"><span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}</div>`).join('') : '<p class="muted">없음</p>'}
+    ${uncontact.length ? uncontact.map((t) => `<div class="task"><span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span> <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}</div>`).join('') : '<p class="muted">없음</p>'}
     <h3>이번 주 처방 나간 환자 수: <b>${weekRx}</b></h3>
     <h3>완주 임박 (마지막 회차 다가옴)</h3>
     ${nearDone.length ? nearDone.map((x) => `<div class="task"><b>${displayName(x.p)}</b> <span class="muted">${x.prog}</span></div>`).join('') : '<p class="muted">없음</p>'}
@@ -205,11 +220,12 @@ function renderCalendar(view: HTMLElement): void {
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     // 완료도 회색으로 남긴다(기록 유지). 취소·연락안됨(대체됨)은 숨김.
-    const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '취소' && t.status !== '연락안됨')
+    const dayTasks = state.tasks.filter((t) => t.due_on === ds && t.status !== '취소' && t.status !== '연락안됨'
+      && !calFilter.hidden.has(t.kind) && !(calFilter.hideDone && t.status === '완료'))
     const chips = dayTasks.map((t) => {
       const done = t.status === '완료'
-      const bg = done ? '#a0aec0' : (COLOR[t.kind] ?? '#888')
-      return `<span class="chip" style="background:${bg}"${done ? ' title="완료"' : ''}>${done ? '✓ ' : ''}${t.label}</span>`
+      const dot = done ? '#a0aec0' : colorOf(t.kind)
+      return `<span class="calchip${done ? ' done' : ''}" style="--dot:${dot}"${done ? ' title="완료"' : ''}>${t.label}</span>`
     }).join('')
     const closed = isClinicClosed(ds, state.settings)
     const hn = holidayName(ds, state.settings)
@@ -226,7 +242,12 @@ function renderCalendar(view: HTMLElement): void {
       <button class="btn" data-action="prevMonth">◀</button>
       <b>${y}년 ${m + 1}월</b>
       <button class="btn" data-action="nextMonth">▶</button>
-      <span class="muted">달력의 일정은 색으로 구분됩니다. 완료 처리는 "오늘 할 일"에서.</span>
+      <span class="muted">날짜를 누르면 그 날 처방·메모를 넣을 수 있어요.</span>
+    </div>
+    <div class="row filterbar" style="margin-bottom:8px">
+      <span class="muted" style="font-size:12px">보기:</span>
+      ${KINDS.map((k) => `<button class="btn fchip ${calFilter.hidden.has(k) ? 'off' : 'on'}" data-action="toggleKind" data-kind="${k}"><i class="fdot" style="background:${colorOf(k)}"></i>${k}</button>`).join('')}
+      <button class="btn ${calFilter.hideDone ? 'primary' : ''}" data-action="toggleHideDone">완료 ${calFilter.hideDone ? '숨김 ✓' : '보임'}</button>
     </div>
     <table class="cal">
       <thead><tr>${['일', '월', '화', '수', '목', '금', '토'].map((w) => `<th>${w}</th>`).join('')}</tr></thead>
@@ -269,7 +290,7 @@ function taskActions(t: Task): string {
 }
 function taskLine(t: Task, overdue: boolean): string {
   return `<div class="task ${overdue ? 'overdue' : ''}">
-    <span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span>
+    <span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span>
     <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}
     <div style="margin-top:4px">${taskActions(t)}</div></div>`
 }
@@ -395,7 +416,13 @@ function renderSettings(view: HTMLElement): void {
     <div class="card"><b>간단 로그인 (PIN)</b>
       <div class="row" style="margin-top:6px"><input id="pinSet" inputmode="numeric" maxlength="4" placeholder="숫자 4자리" value="${state.settings.pin ?? ''}" style="width:110px"><button class="btn primary" data-action="setPin">저장</button></div>
       <span class="muted">PIN을 정하면 다음부터 이 4자리만으로 들어갑니다. 비우고 저장하면 PIN을 끕니다.</span></div>
-    <div class="card"><b>매주 휴진 요일</b><div class="row" style="margin-top:6px">${wkBtns}</div><span class="muted">기본: 일·목</span></div>
+    <div class="card"><b>매주 휴진 요일</b><div class="row" style="margin-top:6px">${wkBtns}</div><span class="muted">기본: 일·목. 토요일은 항상 일정에서 제외됩니다.</span></div>
+    <div class="card"><b>종류별 색</b>
+      <p class="muted" style="margin:4px 0">기본은 검정 계열입니다. 원하는 종류의 색을 바꿔 저장하면 모든 기기에 같은 색으로 보입니다.</p>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        ${KINDS.map((k) => `<label style="display:flex;align-items:center;gap:5px;font-size:13px"><input type="color" id="col-${k}" value="${colorOf(k)}" style="width:34px;height:26px;padding:0;border:1px solid var(--line);border-radius:5px">${k}</label>`).join('')}
+      </div>
+      <div class="row" style="margin-top:8px"><button class="btn primary" data-action="setColors">색 저장</button><button class="btn" data-action="resetColors">기본값(검정)으로</button></div></div>
     <div class="card"><b>법정공휴일</b><div style="margin:6px 0">${hol || '<span class="muted">양력 고정 공휴일(개천절 등)은 자동 인식됩니다. 음력·대체공휴일만 여기 추가</span>'}</div>
       <div class="row"><input type="date" id="holDate"><button class="btn primary" data-action="addHoliday">추가</button></div></div>
     <div class="card"><b>원외탕전 택배 불가일</b><div style="margin:6px 0">${nod || '<span class="muted">없음</span>'}</div>
@@ -411,18 +438,7 @@ async function createRx(p: Patient, blk: Block, date: string, numberStr?: string
   const overall = state.prescriptions.filter((r) => r.patient_id === p.id).length + 1
   const rx = await insertPrescription({ block_id: blk.id, patient_id: p.id, y, overall, prescribed_on: date })
   const newTasks = buildTasksForPrescription(p, rx, blk.x, state.settings, numberStr)
-  // 토요일 문진예정이 최대(기본 3)를 넘으면 금요일로 당김
-  const maxSat = state.settings.max_saturday ?? 3
-  const fu = newTasks.find((t) => t.kind === '문진예정')
-  if (fu && dow(fu.due_on) === 6) {
-    const cnt = state.tasks.filter((t) => t.kind === '문진예정' && t.due_on === fu.due_on && t.status === '예정').length
-    if (cnt >= maxSat) {
-      let cur = addDays(fu.due_on, -1)
-      while (isClinicClosed(cur, state.settings)) cur = addDays(cur, -1)
-      fu.due_on = cur
-      fu.note = fu.note ? `${fu.note} · 토요일 많아 당김` : '토요일 많아 당김'
-    }
-  }
+  // 토요일은 전면 제외되어 자동일정이 토요일에 잡히지 않음(dates.ts에서 회피). 별도 당김 불필요.
   await insertTasks(newTasks)
 }
 async function registerPatient(name: string, region: Region, months: 1 | 2 | 3, birth: string, firstHerbal: boolean, phone = ''): Promise<{ p: Patient; blk: Block }> {
@@ -441,13 +457,13 @@ function openDayModal(ds: string): void {
     ? `<hr style="border:none;border-top:1px solid var(--line);margin:12px 0">
        <div class="row"><b>이 날 일정</b><button class="btn" data-action="selectAllDay">전체 선택</button><button class="btn primary" data-action="completeSelected" data-date="${ds}">선택 완료</button><button class="btn" data-action="smsSelected">📩 선택 문자</button><button class="btn" data-action="delSelected" data-date="${ds}">선택 삭제</button><span class="muted">체크해서 한 번에 완료·문자·삭제</span></div>` +
       dayTasks.map((t) => `<div class="task" style="${t.status === '완료' ? 'opacity:.55;background:#f1f1f4' : ''}">
-        <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${COLOR[t.kind] ?? '#888'}">${t.kind}</span> <b>${t.label}</b>${t.status === '완료' ? ' <span class="muted">✓ 완료</span>' : ''}</label>
+        <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span> <b>${t.label}</b>${t.status === '완료' ? ' <span class="muted">✓ 완료</span>' : ''}</label>
         <div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
     : ''
-  // 일요일·공휴일은 원외탕전 휴무 → 처방 없이 메모만
-  const blocked = dow(ds) === 0 || isHoliday(ds, state.settings)
+  // 토·일·공휴일은 일정을 잡지 않음 → 처방 없이 메모만
+  const blocked = dow(ds) === 0 || dow(ds) === 6 || isHoliday(ds, state.settings)
   const topSection = blocked
-    ? `<p class="muted">${holidayName(ds, state.settings) ?? '일요일'} — 원외탕전 휴무라 처방이 나가지 않습니다. 메모만 남길 수 있어요.</p>
+    ? `<p class="muted">${holidayName(ds, state.settings) ?? (dow(ds) === 6 ? '토요일' : '일요일')} — 토·일·공휴일은 일정을 잡지 않습니다. 메모만 남길 수 있어요.</p>
        <div class="row">
          <input id="m-memo" placeholder="메모 (예: 연휴 안내)" style="width:230px">
          <button class="btn primary" data-action="saveMemo" data-date="${ds}">메모 저장</button>
@@ -466,6 +482,10 @@ function openDayModal(ds: string): void {
          <select id="m-months"><option value="1">한 달(2회)</option><option value="2">두 달(4회)</option><option value="3">3개월(6회)</option></select>
          <label style="font-size:13px"><input type="checkbox" id="m-first"> 한약 초진</label>
          <button class="btn" data-action="closeModal">닫기</button>
+       </div>
+       <div class="row" style="margin-top:8px">
+         <input id="m-memo" placeholder="한 줄 메모 (예: 오후 휴가·택배 지연)" style="width:240px">
+         <button class="btn" data-action="saveMemo" data-date="${ds}">메모 저장</button>
        </div>
        <p class="muted" style="margin-top:6px">이름을 치면 기존 환자가 자동완성됩니다. 이어서 처방하면 다음 번호로, 약을 다 먹은 환자는 개월수를 골라 새 결제(4-1 등)로 이어집니다. 없는 이름은 새 환자로 등록됩니다. 번호는 자동으로 채워지고 고칠 수 있습니다.</p>`
   modal.className = 'open'
@@ -532,6 +552,12 @@ async function handleClick(e: Event): Promise<void> {
 
   // 달력 날짜 클릭 → 팝업
   if (action === 'pickDay') { openDayModal(el.getAttribute('data-date')!); return }
+  if (action === 'toggleKind') {
+    const k = el.getAttribute('data-kind')!
+    if (calFilter.hidden.has(k)) calFilter.hidden.delete(k); else calFilter.hidden.add(k)
+    saveCalFilter(); render(); return
+  }
+  if (action === 'toggleHideDone') { calFilter.hideDone = !calFilter.hideDone; saveCalFilter(); render(); return }
   if (action === 'closeModal') { closeModal(); return }
   if (action === 'rxSmart') {
     const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
@@ -739,6 +765,20 @@ async function handleClick(e: Event): Promise<void> {
   }
 
   // 설정
+  if (action === 'setColors') {
+    const colors: Record<string, string> = {}
+    for (const k of KINDS) {
+      const inp = document.getElementById(`col-${k}`) as HTMLInputElement | null
+      if (inp) colors[k] = inp.value
+    }
+    await saveSettings({ ...state.settings, colors })
+    alert('색을 저장했습니다. 모든 기기에 적용됩니다.')
+    await reload(); return
+  }
+  if (action === 'resetColors') {
+    await saveSettings({ ...state.settings, colors: {} })
+    await reload(); return
+  }
   if (action === 'toggleWk') {
     const dow = Number(el.getAttribute('data-dow'))
     const wc = state.settings.weekly_closed.includes(dow)
