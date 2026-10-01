@@ -1,5 +1,5 @@
 import type { Settings } from './types'
-import { isClinicClosed } from './holidays'
+import { isClinicClosed, isMsgBlocked } from './holidays'
 
 export function addDays(date: string, n: number): string {
   const d = new Date(date + 'T00:00:00')
@@ -39,10 +39,20 @@ export function followupDate(prescribedOn: string, s: Settings): string {
   return cur
 }
 
-export function finalMsg1Date(lastPrescribedOn: string): string {
-  return addDays(lastPrescribedOn, 12)
+// 문자 보낼 수 있는 다음 날(토·일·공휴일 건너뜀, 목요일은 가능)
+export function nextMsgDay(date: string, s: Settings): string {
+  let cur = date
+  for (let i = 0; i < 30; i++) {
+    if (!isMsgBlocked(cur, s)) return cur
+    cur = addDays(cur, 1)
+  }
+  return cur
 }
 
-export function finalMsg2Date(msg1On: string): string {
-  return addDays(msg1On, 10)
+export function finalMsg1Date(lastPrescribedOn: string, s: Settings): string {
+  return nextMsgDay(addDays(lastPrescribedOn, 12), s)
+}
+
+export function finalMsg2Date(msg1On: string, s: Settings): string {
+  return nextMsgDay(addDays(msg1On, 10), s)
 }

@@ -21,8 +21,15 @@ export function isHoliday(date: string, s: Settings): boolean {
   return holidayName(date, s) !== null
 }
 
+// 원내 직원이 필요한 일(확인전화·문진)이 불가한 날: 매주 휴진(일·목) + 토요일 + 공휴일
 export function isClinicClosed(date: string, s: Settings): boolean {
-  return s.weekly_closed.includes(dow(date)) || isHoliday(date, s)
+  return s.weekly_closed.includes(dow(date)) || dow(date) === 6 || isHoliday(date, s)
+}
+
+// 문자·처방이 잡히면 안 되는 날: 토·일·공휴일 전면 제외 (목요일은 예약 발송 가능해서 허용)
+export function isMsgBlocked(date: string, s: Settings): boolean {
+  const d = dow(date)
+  return d === 0 || d === 6 || isHoliday(date, s)
 }
 
 export function isDispensaryOpen(date: string, s: Settings): boolean {

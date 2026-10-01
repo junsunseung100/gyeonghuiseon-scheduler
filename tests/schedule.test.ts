@@ -21,7 +21,7 @@ test('중간 회차: 처방문자(한 항목) / 확인전화(같은 번호) / �
   expect(call.label).toContain('6-1')
   expect(call.due_on).toBe('2026-09-09')
   expect(followup.label).toContain('6-2') // 다음 번호
-  expect(followup.due_on).toBe('2026-09-19')
+  expect(followup.due_on).toBe('2026-09-18') // +10~12 중 토·일 빼고 가장 늦은 날(금)
 })
 
 test('목요일 처방이어도 처방문자는 그날(목)에 그대로', () => {
@@ -41,8 +41,8 @@ test('마지막 회차(y===x)는 문진예정 대신 마무리문자 1·2', () =
   expect(kinds).not.toContain('문진예정')
   const m1 = tasks.find((t) => t.kind === '마무리문자1')!
   const m2 = tasks.find((t) => t.kind === '마무리문자2')!
-  expect(m1.due_on).toBe('2026-09-20') // +12
-  expect(m2.due_on).toBe('2026-09-30') // 1차+10
+  expect(m1.due_on).toBe('2026-09-21') // +12=09-20(일) → 토·일 피해 월요일로
+  expect(m2.due_on).toBe('2026-10-01') // 1차+10=10-01(목), 문자는 목요일 가능
 })
 
 test('토요일 + 지방이면 경고', () => {

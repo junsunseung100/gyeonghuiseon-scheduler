@@ -31,8 +31,8 @@ export function buildTasksForPrescription(p: Patient, rx: Prescription, x: numbe
 
   if (isLast) {
     // 마지막 회차: 마무리문자 1·2
-    const m1 = finalMsg1Date(rx.prescribed_on)
-    const m2 = finalMsg2Date(m1)
+    const m1 = finalMsg1Date(rx.prescribed_on, s)
+    const m2 = finalMsg2Date(m1, s)
     tasks.push({
       patient_id: p.id, prescription_id: rx.id, kind: '마무리문자1',
       label: `${dname} 마무리 문자 1차`, due_on: m1, status: '예정', attempt: 0, note: '',
