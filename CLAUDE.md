@@ -32,9 +32,9 @@
 
 ## 데이터·보안
 
-- Supabase 표: patients, blocks, prescriptions, tasks, settings, **inventory(약장·재고), supply_requests(물품 신청)**.
-- 탭: 대시보드·달력·오늘 할 일·주간·환자·연락 안 됨·**약장·물품신청**·통계·설정.
-- 약장: 수량+유효기간. 경고 판정은 순수 모듈 `inventory.ts`(만료/임박/부족). 부족 품목 → [물품 신청]으로 supply_requests(요청→확인→도착) 생성, 도착 시 재고 반영.
+- Supabase 표: patients, blocks, prescriptions, tasks, settings, **inventory(물품), supply_requests(물품 신청)**.
+- 탭: 대시보드·달력·오늘 할 일·주간·환자·연락 안 됨·**물품·물품신청**·통계·설정.
+- 물품: 원외탕전이라 약장 없음. 두 묶음 — **판매물품**(category='판매물품', 유효기간 관리=구디 약장식) + **소모품**(유효기간 미사용, 수량만). 경고 판정은 순수 모듈 `inventory.ts`(만료/임박/부족). 부족 품목 → [물품 신청]으로 supply_requests(요청→확인→도착) 생성, 도착 시 수량 반영.
 - RLS 켜짐(로그인 사용자만), 공개 가입 차단. 키는 `.env.local`(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) — **절대 커밋 금지.** Vercel에는 대시보드 환경변수.
 
 ## 코딩 규칙
