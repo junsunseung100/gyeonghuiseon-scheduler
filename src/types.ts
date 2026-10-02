@@ -51,4 +51,28 @@ export interface Settings {
   pin?: string // 4자리 PIN (빠른 로그인)
   max_saturday?: number // (사용 안 함) 과거 토요일 문진 제한
   colors?: Record<string, string> // 종류별 색 (간호사가 설정에서 변경, 전 기기 공유)
+  expiry_warn_days?: number // 유효기간 임박 경고 일수 (기본 90)
+}
+
+export interface InventoryItem {
+  id: string
+  name: string
+  category: string // 외용제/내복/소모품/기타
+  qty: number
+  unit: string // 개·통·박스 등
+  expiry?: string | null // YYYY-MM-DD
+  reorder_at?: number | null // 이 수량 이하면 '부족'
+  note?: string
+  created_at?: string
+}
+
+export interface SupplyRequest {
+  id: string
+  name: string
+  qty: number
+  unit: string
+  status: '요청' | '확인' | '도착'
+  inventory_id?: string | null // 약장 품목과 연결(도착 시 그 품목에 수량 더함)
+  note?: string
+  created_at?: string
 }

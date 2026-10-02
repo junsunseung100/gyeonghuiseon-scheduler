@@ -1,5 +1,5 @@
 import { createClient, type User } from '@supabase/supabase-js'
-import type { Patient, Block, Prescription, Task, Settings } from './types'
+import type { Patient, Block, Prescription, Task, Settings, InventoryItem, SupplyRequest } from './types'
 
 export const sb = createClient(
   import.meta.env.VITE_SUPABASE_URL as string,
@@ -33,18 +33,25 @@ export async function loadAll(): Promise<{
   blocks: Block[]
   prescriptions: Prescription[]
   tasks: Task[]
+  inventory: InventoryItem[]
+  supplyRequests: SupplyRequest[]
 }> {
-  const [patients, blocks, prescriptions, tasks] = await Promise.all([
+  // inventory·supply_requests 표가 아직 없으면 error만 오고 data는 null → []로 처리(앱 안 깨짐)
+  const [patients, blocks, prescriptions, tasks, inventory, supply] = await Promise.all([
     sb.from('patients').select('*').order('name'),
     sb.from('blocks').select('*').order('created_at'),
     sb.from('prescriptions').select('*').order('prescribed_on'),
     sb.from('tasks').select('*').order('due_on'),
+    sb.from('inventory').select('*').order('name'),
+    sb.from('supply_requests').select('*').order('created_at'),
   ])
   return {
     patients: (patients.data ?? []) as Patient[],
     blocks: (blocks.data ?? []) as Block[],
     prescriptions: (prescriptions.data ?? []) as Prescription[],
     tasks: (tasks.data ?? []) as Task[],
+    inventory: (inventory.data ?? []) as InventoryItem[],
+    supplyRequests: (supply.data ?? []) as SupplyRequest[],
   }
 }
 export async function loadSettings(): Promise<Settings> {
@@ -54,6 +61,7 @@ export async function loadSettings(): Promise<Settings> {
     holidays: (data?.holidays ?? []) as string[],
     no_delivery: (data?.no_delivery ?? []) as string[],
     colors: (data?.colors ?? undefined) as Record<string, string> | undefined,
+    expiry_warn_days: (data?.expiry_warn_days ?? undefined) as number | undefined,
   }
 }
 
@@ -113,4 +121,26 @@ export async function insertRaw(table: string, rows: Record<string, unknown>[]):
   if (!rows.length) return
   const { error } = await sb.from(table).insert(rows)
   if (error) throw error
+}
+
+// ---- 약장·재고 ----
+export async function insertInvItem(it: Omit<InventoryItem, 'id'>): Promise<void> {
+  const { error } = await sb.from('inventory').insert(it); if (error) throw error
+}
+export async function updateInvItem(id: string, patch: Partial<InventoryItem>): Promise<void> {
+  const { error } = await sb.from('inventory').update(patch).eq('id', id); if (error) throw error
+}
+export async function deleteInvItem(id: string): Promise<void> {
+  await sb.from('inventory').delete().eq('id', id)
+}
+
+// ---- 물품 신청 ----
+export async function insertSupplyReq(r: Omit<SupplyRequest, 'id'>): Promise<void> {
+  const { error } = await sb.from('supply_requests').insert(r); if (error) throw error
+}
+export async function updateSupplyReq(id: string, patch: Partial<SupplyRequest>): Promise<void> {
+  const { error } = await sb.from('supply_requests').update(patch).eq('id', id); if (error) throw error
+}
+export async function deleteSupplyReq(id: string): Promise<void> {
+  await sb.from('supply_requests').delete().eq('id', id)
 }

@@ -1,15 +1,17 @@
 import type { User } from '@supabase/supabase-js'
-import type { Patient, Block, Prescription, Task, Settings, Region } from './types'
+import type { Patient, Block, Prescription, Task, Settings, Region, InventoryItem, SupplyRequest } from './types'
 import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
   updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient, signInAnon,
+  insertInvItem, updateInvItem, deleteInvItem, insertSupplyReq, updateSupplyReq, deleteSupplyReq,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
 import { isClinicClosed, isHoliday, holidayName, dow } from './holidays'
 import { addDays } from './dates'
+import { invStatuses, sortInventory, isLow } from './inventory'
 
 // ---------- 상태 ----------
 interface State {
@@ -18,6 +20,8 @@ interface State {
   blocks: Block[]
   prescriptions: Prescription[]
   tasks: Task[]
+  inventory: InventoryItem[]
+  supplyRequests: SupplyRequest[]
   settings: Settings
   tab: string
   year: number
@@ -27,7 +31,7 @@ interface State {
 }
 const now = new Date()
 const state: State = {
-  user: null, patients: [], blocks: [], prescriptions: [], tasks: [],
+  user: null, patients: [], blocks: [], prescriptions: [], tasks: [], inventory: [], supplyRequests: [],
   settings: { weekly_closed: [0, 4], holidays: [], no_delivery: [] },
   tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', unlocked: false,
 }
@@ -53,7 +57,7 @@ function saveCalFilter(): void {
 }
 const TABS: [string, string][] = [
   ['dashboard', '대시보드'], ['calendar', '달력'], ['today', '오늘 할 일'], ['weekly', '주간 요약'],
-  ['patients', '환자'], ['uncontactable', '연락 안 됨'], ['stats', '통계'], ['settings', '설정'],
+  ['patients', '환자'], ['uncontactable', '연락 안 됨'], ['inventory', '약장'], ['supply', '물품신청'], ['stats', '통계'], ['settings', '설정'],
 ]
 
 // ---------- 유틸 ----------
@@ -93,6 +97,7 @@ async function reload(): Promise<void> {
   const [data, s] = await Promise.all([loadAll(), loadSettings()])
   state.patients = data.patients; state.blocks = data.blocks
   state.prescriptions = data.prescriptions; state.tasks = data.tasks
+  state.inventory = data.inventory; state.supplyRequests = data.supplyRequests
   state.settings = s
   render()
 }
@@ -164,6 +169,8 @@ function render(): void {
   else if (state.tab === 'weekly') renderWeekly(view)
   else if (state.tab === 'patients') renderPatients(view)
   else if (state.tab === 'uncontactable') renderUncontactable(view)
+  else if (state.tab === 'inventory') renderInventory(view)
+  else if (state.tab === 'supply') renderSupply(view)
   else if (state.tab === 'stats') renderStats(view)
   else if (state.tab === 'settings') renderSettings(view)
 }
@@ -191,6 +198,8 @@ function renderDashboard(view: HTMLElement): void {
   }
   const stat = (label: string, n: number, red = false): string =>
     `<div class="card" style="text-align:center;min-width:90px${red ? ';border-color:var(--red)' : ''}">${label}<div style="font-size:22px;font-weight:700${red ? ';color:var(--red)' : ''}">${n}</div></div>`
+  const needOrder = state.supplyRequests.filter((r) => r.status === '요청').length
+  const invWarn = state.inventory.filter((it) => !invStatuses(it, today, state.settings.expiry_warn_days ?? 90).includes('ok')).length
   view.innerHTML = `
     <h3>오늘 (${today})</h3>
     <div class="row">
@@ -201,6 +210,10 @@ function renderDashboard(view: HTMLElement): void {
       ${stat('마무리문자', cnt(todayTasks, '마무리문자1') + cnt(todayTasks, '마무리문자2'))}
       ${stat('지난(놓친)', overdue.length, true)}
     </div>
+    ${(needOrder || invWarn) ? `<div class="card" style="border-color:var(--red);margin-top:4px">
+      ${needOrder ? `📦 <b style="color:var(--red)">주문 필요 ${needOrder}건</b> <button class="btn" data-tab="supply">물품신청 보기</button>` : ''}
+      ${invWarn ? ` &nbsp; ⚠️ <b>약장 경고 ${invWarn}건</b>(유효기간·부족) <button class="btn" data-tab="inventory">약장 보기</button>` : ''}
+    </div>` : ''}
     <h3>연락 안 됨 · 재연락 · 대기 (${uncontact.length})</h3>
     ${uncontact.length ? uncontact.map((t) => `<div class="task"><span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span> <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}</div>`).join('') : '<p class="muted">없음</p>'}
     <h3>이번 주 처방 나간 환자 수: <b>${weekRx}</b></h3>
@@ -377,6 +390,86 @@ function renderUncontactable(view: HTMLElement): void {
 }
 
 // ---------- 통계 ----------
+// ---------- 약장·재고 ----------
+const INV_CATS = ['외용제', '내복', '소모품', '기타']
+function renderInventory(view: HTMLElement): void {
+  const today = todayStr()
+  const warnDays = state.settings.expiry_warn_days ?? 90
+  const list = sortInventory(state.inventory, today, warnDays)
+  const expCnt = state.inventory.filter((it) => { const st = invStatuses(it, today, warnDays); return st.includes('expired') || st.includes('expiring') }).length
+  const lowCnt = state.inventory.filter((it) => isLow(it)).length
+  const row = (it: InventoryItem): string => {
+    const st = invStatuses(it, today, warnDays)
+    const badges = [
+      st.includes('expired') ? '<span class="chip" style="background:var(--red)">만료</span>' : '',
+      st.includes('expiring') ? '<span class="chip" style="background:var(--gold)">임박</span>' : '',
+      st.includes('low') ? '<span class="chip" style="background:var(--red)">부족</span>' : '',
+    ].join(' ')
+    return `<div class="task${st.includes('ok') ? '' : ' overdue'}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div style="min-width:0">
+          <b>${it.name}</b> <span class="muted">${it.category}</span> ${badges}
+          <div class="muted" style="font-size:12px">${it.unit ? `단위 ${it.unit} · ` : ''}${it.expiry ? `유효기간 ${it.expiry}` : '유효기간 없음'}${it.reorder_at != null ? ` · 부족기준 ${it.reorder_at}` : ''}${it.note ? ` · ${it.note}` : ''}</div>
+        </div>
+        <div class="row" style="gap:4px;align-items:center;flex-wrap:nowrap">
+          <button class="btn" data-action="invMinus" data-id="${it.id}">−</button>
+          <b style="min-width:34px;text-align:center">${it.qty}</b>
+          <button class="btn" data-action="invPlus" data-id="${it.id}">＋</button>
+        </div>
+      </div>
+      <div style="margin-top:4px">
+        ${isLow(it) ? `<button class="btn primary" data-action="reqFromInv" data-id="${it.id}">📦 물품 신청</button>` : ''}
+        <button class="btn" data-action="editInv" data-id="${it.id}">수정</button>
+        <button class="btn" data-action="delInv" data-id="${it.id}">삭제</button>
+      </div></div>`
+  }
+  view.innerHTML = `
+    <h3>약장 · 재고</h3>
+    <div class="row">
+      <div class="card" style="text-align:center;min-width:130px${expCnt ? ';border-color:var(--gold)' : ''}">⚠️ 유효기간 임박/만료<div style="font-size:22px;font-weight:700">${expCnt}</div></div>
+      <div class="card" style="text-align:center;min-width:90px${lowCnt ? ';border-color:var(--red)' : ''}">📉 부족<div style="font-size:22px;font-weight:700${lowCnt ? ';color:var(--red)' : ''}">${lowCnt}</div></div>
+    </div>
+    <div class="card"><b>품목 추가</b>
+      <div class="row" style="margin-top:6px">
+        <input id="iv-name" placeholder="품목명" style="width:150px">
+        <select id="iv-cat">${INV_CATS.map((c) => `<option>${c}</option>`).join('')}</select>
+        <input id="iv-qty" type="number" placeholder="수량" style="width:70px" value="1">
+        <input id="iv-unit" placeholder="단위(개·통)" style="width:90px">
+        <input id="iv-exp" type="date" title="유효기간(선택)">
+        <input id="iv-reorder" type="number" placeholder="부족기준" style="width:80px" title="이 수량 이하면 부족(선택)">
+        <button class="btn primary" data-action="addInv">추가</button>
+      </div>
+      <span class="muted">유효기간·부족기준은 선택입니다. 부족기준을 넣으면 그 수량 이하일 때 '부족'으로 뜨고 [물품 신청] 버튼이 생깁니다.</span></div>
+    ${list.length ? list.map(row).join('') : '<p class="muted">품목이 없습니다. 위에서 추가하세요.</p>'}`
+}
+
+// ---------- 물품 신청 ----------
+const SUPPLY_ORDER = ['요청', '확인', '도착'] as const
+function renderSupply(view: HTMLElement): void {
+  const byStatus = (s: string): SupplyRequest[] => state.supplyRequests.filter((r) => r.status === s)
+  const reqRow = (r: SupplyRequest): string => {
+    const next = SUPPLY_ORDER[SUPPLY_ORDER.indexOf(r.status as typeof SUPPLY_ORDER[number]) + 1]
+    const bg = r.status === '도착' ? 'var(--green)' : r.status === '확인' ? 'var(--blue)' : 'var(--gold)'
+    return `<div class="task">
+      <b>${r.name}</b> <span class="muted">${r.qty}${r.unit || ''}</span>
+      <span class="chip" style="background:${bg}">${r.status}</span>${r.inventory_id ? ' <span class="badge">약장</span>' : ''}
+      <div style="margin-top:4px">
+        ${next ? `<button class="btn primary" data-action="supplyNext" data-id="${r.id}">${next}(으)로</button>` : '<span class="muted">완료</span>'}
+        <button class="btn" data-action="delSupply" data-id="${r.id}">삭제</button>
+      </div></div>`
+  }
+  view.innerHTML = `
+    <h3>물품 신청 (요청 → 확인 → 도착)</h3>
+    <div class="card"><b>새 물품 신청</b>
+      <div class="row" style="margin-top:6px">
+        <input id="sp-name" placeholder="물품명" style="width:160px">
+        <input id="sp-qty" type="number" placeholder="수량" style="width:70px" value="1">
+        <input id="sp-unit" placeholder="단위" style="width:80px">
+        <button class="btn primary" data-action="addSupply">신청</button>
+      </div></div>
+    ${SUPPLY_ORDER.map((s) => `<h4 style="margin:12px 0 4px">${s} (${byStatus(s).length})</h4>${byStatus(s).length ? byStatus(s).map(reqRow).join('') : '<p class="muted">없음</p>'}`).join('')}`
+}
+
 function renderStats(view: HTMLElement): void {
   // 환자별 첫 처방월
   const firstMonth = new Map<string, string>()
@@ -426,7 +519,10 @@ function renderSettings(view: HTMLElement): void {
     <div class="card"><b>법정공휴일</b><div style="margin:6px 0">${hol || '<span class="muted">양력 고정 공휴일(개천절 등)은 자동 인식됩니다. 음력·대체공휴일만 여기 추가</span>'}</div>
       <div class="row"><input type="date" id="holDate"><button class="btn primary" data-action="addHoliday">추가</button></div></div>
     <div class="card"><b>원외탕전 택배 불가일</b><div style="margin:6px 0">${nod || '<span class="muted">없음</span>'}</div>
-      <div class="row"><input type="date" id="nodDate"><button class="btn primary" data-action="addNoDel">추가</button></div></div>`
+      <div class="row"><input type="date" id="nodDate"><button class="btn primary" data-action="addNoDel">추가</button></div></div>
+    <div class="card"><b>약장 유효기간 경고</b>
+      <div class="row" style="margin-top:6px">유효기간 <input id="expWarn" type="number" value="${state.settings.expiry_warn_days ?? 90}" style="width:80px"> 일 이내면 '임박' 경고
+      <button class="btn primary" data-action="setExpiryWarn">저장</button></div></div>`
 }
 
 // ---------- 처방 생성 공통 ----------
@@ -558,6 +654,79 @@ async function handleClick(e: Event): Promise<void> {
     saveCalFilter(); render(); return
   }
   if (action === 'toggleHideDone') { calFilter.hideDone = !calFilter.hideDone; saveCalFilter(); render(); return }
+
+  // --- 약장·재고 ---
+  if (action === 'addInv') {
+    const name = (document.getElementById('iv-name') as HTMLInputElement).value.trim()
+    if (!name) { alert('품목명을 입력하세요.'); return }
+    const category = (document.getElementById('iv-cat') as HTMLSelectElement).value
+    const qty = Number((document.getElementById('iv-qty') as HTMLInputElement).value) || 0
+    const unit = (document.getElementById('iv-unit') as HTMLInputElement).value.trim()
+    const exp = (document.getElementById('iv-exp') as HTMLInputElement).value
+    const reorderStr = (document.getElementById('iv-reorder') as HTMLInputElement).value
+    await insertInvItem({ name, category, qty, unit, expiry: exp || null, reorder_at: reorderStr === '' ? null : Number(reorderStr), note: '' })
+    await reload(); return
+  }
+  if (action === 'invPlus' || action === 'invMinus') {
+    const it = state.inventory.find((x) => x.id === id); if (!it) return
+    await updateInvItem(id, { qty: Math.max(0, it.qty + (action === 'invPlus' ? 1 : -1)) }); await reload(); return
+  }
+  if (action === 'editInv') {
+    const it = state.inventory.find((x) => x.id === id); if (!it) return
+    const name = prompt('품목명', it.name); if (name === null) return
+    const qtyStr = prompt('수량', String(it.qty)); if (qtyStr === null) return
+    const unit = prompt('단위(개·통 등)', it.unit) ?? it.unit
+    const exp = prompt('유효기간(YYYY-MM-DD, 없으면 비움)', it.expiry ?? '') ?? ''
+    const reorderStr = prompt('부족기준 수량(없으면 비움)', it.reorder_at != null ? String(it.reorder_at) : '') ?? ''
+    await updateInvItem(id, { name: name.trim() || it.name, qty: Number(qtyStr) || 0, unit, expiry: exp.trim() || null, reorder_at: reorderStr.trim() === '' ? null : Number(reorderStr) })
+    await reload(); return
+  }
+  if (action === 'delInv') {
+    const it = state.inventory.find((x) => x.id === id)
+    if (it && confirm(`${it.name}을(를) 약장에서 지울까요? (Ctrl+Z로 되돌릴 수 있음)`)) {
+      const snap = it
+      pushUndo(async () => { await insertRaw('inventory', [snap as unknown as Record<string, unknown>]) })
+      await deleteInvItem(id); await reload()
+    }
+    return
+  }
+  if (action === 'reqFromInv') {
+    const it = state.inventory.find((x) => x.id === id); if (!it) return
+    const qtyStr = prompt(`${it.name} 몇 ${it.unit || '개'} 신청할까요?`, '1'); if (qtyStr === null) return
+    await insertSupplyReq({ name: it.name, qty: Number(qtyStr) || 1, unit: it.unit, status: '요청', inventory_id: it.id, note: '' })
+    alert('물품 신청 목록(요청)에 올렸습니다.'); await reload(); return
+  }
+  // --- 물품 신청 ---
+  if (action === 'addSupply') {
+    const name = (document.getElementById('sp-name') as HTMLInputElement).value.trim()
+    if (!name) { alert('물품명을 입력하세요.'); return }
+    const qty = Number((document.getElementById('sp-qty') as HTMLInputElement).value) || 1
+    const unit = (document.getElementById('sp-unit') as HTMLInputElement).value.trim()
+    await insertSupplyReq({ name, qty, unit, status: '요청', inventory_id: null, note: '' })
+    await reload(); return
+  }
+  if (action === 'supplyNext') {
+    const r = state.supplyRequests.find((x) => x.id === id); if (!r) return
+    const next = SUPPLY_ORDER[SUPPLY_ORDER.indexOf(r.status as typeof SUPPLY_ORDER[number]) + 1]
+    if (!next) return
+    await updateSupplyReq(id, { status: next })
+    if (next === '도착' && r.inventory_id) {
+      const it = state.inventory.find((x) => x.id === r.inventory_id)
+      if (it && confirm(`도착! ${it.name} 재고에 ${r.qty}${it.unit || ''} 더할까요?`)) {
+        await updateInvItem(it.id, { qty: it.qty + r.qty })
+      }
+    }
+    await reload(); return
+  }
+  if (action === 'delSupply') {
+    const r = state.supplyRequests.find((x) => x.id === id)
+    if (r && confirm(`'${r.name}' 신청을 지울까요? (Ctrl+Z로 되돌릴 수 있음)`)) {
+      const snap = r
+      pushUndo(async () => { await insertRaw('supply_requests', [snap as unknown as Record<string, unknown>]) })
+      await deleteSupplyReq(id); await reload()
+    }
+    return
+  }
   if (action === 'closeModal') { closeModal(); return }
   if (action === 'rxSmart') {
     const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
@@ -778,6 +947,10 @@ async function handleClick(e: Event): Promise<void> {
   if (action === 'resetColors') {
     await saveSettings({ ...state.settings, colors: {} })
     await reload(); return
+  }
+  if (action === 'setExpiryWarn') {
+    const v = Number((document.getElementById('expWarn') as HTMLInputElement).value) || 90
+    await saveSettings({ ...state.settings, expiry_warn_days: v }); await reload(); return
   }
   if (action === 'toggleWk') {
     const dow = Number(el.getAttribute('data-dow'))
