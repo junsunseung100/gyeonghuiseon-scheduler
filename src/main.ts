@@ -390,14 +390,14 @@ function renderUncontactable(view: HTMLElement): void {
 }
 
 // ---------- 통계 ----------
-// ---------- 물품 (판매물품 + 소모품) ----------
-const INV_CATS = ['판매물품', '소모품']
+// ---------- 물품 (약품 + 소모품) ----------
+const INV_CATS = ['약품', '소모품']
 function renderInventory(view: HTMLElement): void {
   const today = todayStr()
   const warnDays = state.settings.expiry_warn_days ?? 90
   const expCnt = state.inventory.filter((it) => { const st = invStatuses(it, today, warnDays); return st.includes('expired') || st.includes('expiring') }).length
   const lowCnt = state.inventory.filter((it) => isLow(it)).length
-  // showExpiry=true면 판매물품(유효기간 보임), false면 소모품
+  // showExpiry=true면 약품(유효기간 보임), false면 소모품
   const row = (it: InventoryItem, showExpiry: boolean): string => {
     const st = invStatuses(it, today, warnDays)
     const badges = [
@@ -427,10 +427,11 @@ function renderInventory(view: HTMLElement): void {
         <button class="btn" data-action="delInv" data-id="${it.id}">삭제</button>
       </div></div>`
   }
-  const section = (title: string, sale: boolean): string => {
-    const items = sortInventory(state.inventory.filter((it) => (it.category === '판매물품') === sale), today, warnDays)
+  // 소모품이 아니면 모두 '약품'(유효기간 관리) 묶음
+  const section = (title: string, drug: boolean): string => {
+    const items = sortInventory(state.inventory.filter((it) => (it.category !== '소모품') === drug), today, warnDays)
     return `<h4 style="margin:16px 0 4px">${title} (${items.length})</h4>` +
-      (items.length ? items.map((it) => row(it, sale)).join('') : '<p class="muted">없음</p>')
+      (items.length ? items.map((it) => row(it, drug)).join('') : '<p class="muted">없음</p>')
   }
   view.innerHTML = `
     <h3>물품</h3>
@@ -444,12 +445,12 @@ function renderInventory(view: HTMLElement): void {
         <input id="iv-name" placeholder="물품명" style="width:150px">
         <input id="iv-qty" type="number" placeholder="수량" style="width:70px" value="1">
         <input id="iv-unit" placeholder="단위(개·통)" style="width:90px">
-        <input id="iv-exp" type="date" title="유효기간(판매물품만)">
+        <input id="iv-exp" type="date" title="유효기간(약품만)">
         <input id="iv-reorder" type="number" placeholder="부족기준" style="width:80px" title="이 수량 이하면 부족(선택)">
         <button class="btn primary" data-action="addInv">추가</button>
       </div>
-      <span class="muted">판매물품은 유효기간을 넣고, 소모품은 유효기간을 비워두면 됩니다. 부족기준을 넣으면 그 수량 이하일 때 '부족'으로 뜨고 [물품 신청]이 생깁니다.</span></div>
-    ${section('🏷️ 판매물품 (유효기간 관리)', true)}
+      <span class="muted">약품은 유효기간을 넣고, 소모품은 유효기간을 비워두면 됩니다. 부족기준을 넣으면 그 수량 이하일 때 '부족'으로 뜨고 [물품 신청]이 생깁니다.</span></div>
+    ${section('💉 약품 (유효기간 관리)', true)}
     ${section('📦 소모품', false)}`
 }
 
