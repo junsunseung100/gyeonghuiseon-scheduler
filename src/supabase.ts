@@ -14,10 +14,23 @@ export async function signIn(email: string, password: string): Promise<void> {
 export async function signOut(): Promise<void> {
   await sb.auth.signOut()
 }
-// PIN 전용: 비밀번호 없이 익명 세션으로 접속(실제 접근 제어는 앱의 PIN)
+// PIN 전용: 비밀번호 없이 익명 세션으로 접속(구버전, 사용 안 함)
 export async function signInAnon(): Promise<void> {
   const { error } = await sb.auth.signInAnonymously()
   if (error) throw error
+}
+// PIN을 서버 함수(/api/login)에 보내 검사 → 맞으면 공용 계정 세션을 받아 설정
+export async function loginWithPin(pin: string): Promise<boolean> {
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }),
+    })
+    if (!r.ok) return false
+    const d = await r.json()
+    if (!d.access_token || !d.refresh_token) return false
+    const { error } = await sb.auth.setSession({ access_token: d.access_token, refresh_token: d.refresh_token })
+    return !error
+  } catch { return false }
 }
 export async function currentUser(): Promise<User | null> {
   const { data } = await sb.auth.getUser()

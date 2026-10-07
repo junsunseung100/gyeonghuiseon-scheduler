@@ -1,10 +1,10 @@
 import type { User } from '@supabase/supabase-js'
 import type { Patient, Block, Prescription, Task, Settings, Region, InventoryItem, SupplyRequest, BoardNote } from './types'
 import {
-  currentUser, onAuth, signIn, signOut,
+  currentUser, onAuth, signOut, loginWithPin,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
-  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient, signInAnon,
+  updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient,
   insertInvItem, updateInvItem, deleteInvItem, insertSupplyReq, updateSupplyReq, deleteSupplyReq,
   insertBoardNote, deleteBoardNote,
 } from './supabase'
@@ -105,33 +105,7 @@ async function reload(): Promise<void> {
   render()
 }
 
-// ---------- 렌더: 로그인 ----------
-function renderLogin(root: HTMLElement): void {
-  root.innerHTML = `
-    <div id="login" class="card">
-      <h1>경희선한의원 · 문진일정</h1>
-      <p class="muted">등록된 계정으로 로그인하세요.</p>
-      <form id="loginForm">
-        <label class="field">이메일<input name="email" type="email" required></label>
-        <label class="field" style="margin-top:8px">비밀번호<input name="password" type="password" required></label>
-        <div id="loginErr" style="color:var(--red);font-size:12px;margin-top:8px"></div>
-        <button class="btn primary" style="margin-top:12px;width:100%;padding:8px" type="submit">로그인</button>
-      </form>
-    </div>`
-  const form = root.querySelector('#loginForm') as HTMLFormElement
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const fd = new FormData(form)
-    try {
-      await signIn(String(fd.get('email')), String(fd.get('password')))
-    } catch (err) {
-      (root.querySelector('#loginErr') as HTMLElement).textContent =
-        '로그인 실패: 이메일·비밀번호를 확인하세요.'
-    }
-  })
-}
-
-// ---------- 렌더: PIN 잠금 ----------
+// ---------- 렌더: PIN 잠금(서버에서 검사) ----------
 function renderPin(root: HTMLElement): void {
   root.innerHTML = `
     <div id="login" class="card">
@@ -139,7 +113,7 @@ function renderPin(root: HTMLElement): void {
       <p class="muted">4자리 비밀번호(PIN)를 입력하세요.</p>
       <input id="pinInput" inputmode="numeric" maxlength="4" placeholder="● ● ● ●" style="width:100%;font-size:24px;text-align:center;letter-spacing:8px;padding:8px">
       <div id="pinErr" style="color:var(--red);font-size:12px;margin-top:8px"></div>
-      <button class="btn primary" style="margin-top:12px;width:100%;padding:8px" data-action="pinEnter">들어가기</button>
+      <button class="btn primary" id="pinBtn" style="margin-top:12px;width:100%;padding:8px" data-action="pinEnter">들어가기</button>
     </div>`
   const inp = root.querySelector('#pinInput') as HTMLInputElement
   inp.focus()
@@ -148,15 +122,21 @@ function renderPin(root: HTMLElement): void {
 async function handlePinEnter(): Promise<void> {
   const inp = document.getElementById('pinInput') as HTMLInputElement | null
   if (!inp) return
-  if (inp.value === (state.settings.pin ?? '')) { state.unlocked = true; render() }
-  else { const e = document.getElementById('pinErr'); if (e) e.textContent = 'PIN이 틀렸습니다.'; inp.value = '' }
+  const btn = document.getElementById('pinBtn') as HTMLButtonElement | null
+  const err = document.getElementById('pinErr')
+  if (btn) { btn.disabled = true; btn.textContent = '확인 중…' }
+  const ok = await loginWithPin(inp.value.trim())
+  if (ok) { state.user = await currentUser(); await reload() }
+  else {
+    if (err) err.textContent = 'PIN이 맞지 않습니다.'
+    inp.value = ''; if (btn) { btn.disabled = false; btn.textContent = '들어가기' }
+  }
 }
 
 // ---------- 렌더: 앱 ----------
 function render(): void {
   const root = document.getElementById('root') as HTMLElement
-  if (!state.user) { renderLogin(root); return }
-  if (state.settings.pin && !state.unlocked) { renderPin(root); return }
+  if (!state.user) { renderPin(root); return }
   root.innerHTML = `
     <header>
       <h1>경희선한의원 · 문진일정 달력</h1>
@@ -548,9 +528,8 @@ function renderSettings(view: HTMLElement): void {
   const hol = state.settings.holidays.map((h) => `<span class="badge">${h} <button class="btn" data-action="delHoliday" data-date="${h}">x</button></span>`).join(' ')
   const nod = state.settings.no_delivery.map((h) => `<span class="badge">${h} <button class="btn" data-action="delNoDel" data-date="${h}">x</button></span>`).join(' ')
   view.innerHTML = `
-    <div class="card"><b>간단 로그인 (PIN)</b>
-      <div class="row" style="margin-top:6px"><input id="pinSet" inputmode="numeric" maxlength="4" placeholder="숫자 4자리" value="${state.settings.pin ?? ''}" style="width:110px"><button class="btn primary" data-action="setPin">저장</button></div>
-      <span class="muted">PIN을 정하면 다음부터 이 4자리만으로 들어갑니다. 비우고 저장하면 PIN을 끕니다.</span></div>
+    <div class="card"><b>로그인 PIN</b>
+      <span class="muted">로그인 PIN은 서버에서 안전하게 관리됩니다(여기서 바꾸지 않습니다). 바꾸려면 설정값(APP_PIN)을 고치면 됩니다.</span></div>
     <div class="card"><b>매주 휴진 요일</b><div class="row" style="margin-top:6px">${wkBtns}</div><span class="muted">기본: 일·목. 토요일은 항상 일정에서 제외됩니다.</span></div>
     <div class="card"><b>종류별 색</b>
       <p class="muted" style="margin:4px 0">기본은 검정 계열입니다. 원하는 종류의 색을 바꿔 저장하면 모든 기기에 같은 색으로 보입니다.</p>
@@ -1053,11 +1032,8 @@ onAuth(async (user) => {
   else render()
 })
 async function boot(): Promise<void> {
-  let user = await currentUser()
-  if (!user) {
-    // 이메일·비번 없이 익명 세션으로 접속(실패하면 로그인 화면 fallback)
-    try { await signInAnon(); user = await currentUser() } catch (e) { /* 익명 미허용 등 */ }
-  }
+  // 세션 있으면 그대로, 없으면 PIN 화면(서버가 PIN 검사 후 공용 계정으로 로그인)
+  const user = await currentUser()
   state.user = user
   if (user) await reload()
   else render()
