@@ -66,6 +66,12 @@ export interface InventoryItem {
   created_at?: string
 }
 
+export interface BoardNote {
+  id: string
+  text: string
+  created_at?: string
+}
+
 export interface SupplyRequest {
   id: string
   name: string

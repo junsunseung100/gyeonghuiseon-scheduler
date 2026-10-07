@@ -1,11 +1,12 @@
 import type { User } from '@supabase/supabase-js'
-import type { Patient, Block, Prescription, Task, Settings, Region, InventoryItem, SupplyRequest } from './types'
+import type { Patient, Block, Prescription, Task, Settings, Region, InventoryItem, SupplyRequest, BoardNote } from './types'
 import {
   currentUser, onAuth, signIn, signOut,
   loadAll, loadSettings,
   insertPatient, insertBlock, insertPrescription, insertTasks,
   updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient, signInAnon,
   insertInvItem, updateInvItem, deleteInvItem, insertSupplyReq, updateSupplyReq, deleteSupplyReq,
+  insertBoardNote, deleteBoardNote,
 } from './supabase'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
@@ -22,6 +23,7 @@ interface State {
   tasks: Task[]
   inventory: InventoryItem[]
   supplyRequests: SupplyRequest[]
+  boardNotes: BoardNote[]
   settings: Settings
   tab: string
   year: number
@@ -31,7 +33,7 @@ interface State {
 }
 const now = new Date()
 const state: State = {
-  user: null, patients: [], blocks: [], prescriptions: [], tasks: [], inventory: [], supplyRequests: [],
+  user: null, patients: [], blocks: [], prescriptions: [], tasks: [], inventory: [], supplyRequests: [], boardNotes: [],
   settings: { weekly_closed: [0, 4], holidays: [], no_delivery: [] },
   tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', unlocked: false,
 }
@@ -98,6 +100,7 @@ async function reload(): Promise<void> {
   state.patients = data.patients; state.blocks = data.blocks
   state.prescriptions = data.prescriptions; state.tasks = data.tasks
   state.inventory = data.inventory; state.supplyRequests = data.supplyRequests
+  state.boardNotes = data.boardNotes
   state.settings = s
   render()
 }
@@ -175,51 +178,79 @@ function render(): void {
   else if (state.tab === 'settings') renderSettings(view)
 }
 
-// ---------- 대시보드 (오늘 한눈에) ----------
+// ---------- 대시보드 (하루 일의 흐름) ----------
+function esc(s: string): string { return s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string)) }
+const DASH_STEPS: { num: string; title: string; color: string; kinds: string[] }[] = [
+  { num: '1', title: '📩 처방·문자', color: 'var(--brown)', kinds: ['처방문자', '처방', '문자'] },
+  { num: '2', title: '📞 확인전화', color: 'var(--blue)', kinds: ['확인전화'] },
+  { num: '3', title: '📋 문진예정', color: 'var(--green)', kinds: ['문진예정'] },
+  { num: '4', title: '✉️ 마무리문자', color: 'var(--gold)', kinds: ['마무리문자1', '마무리문자2'] },
+  { num: '5', title: '🔁 재연락', color: 'var(--red)', kinds: ['재연락', '연락대기'] },
+]
 function renderDashboard(view: HTMLElement): void {
   const today = todayStr()
-  const active = state.tasks.filter((t) => t.status === '예정')
-  const todayTasks = active.filter((t) => t.due_on === today)
-  const overdue = active.filter((t) => t.due_on < today)
-  const cnt = (arr: Task[], k: string): number => arr.filter((t) => t.kind === k).length
-  // 이번 주(월~일) 처방 나간 환자 수
-  const d = new Date(); const day = d.getDay(); const monday = new Date(d); monday.setDate(d.getDate() - ((day + 6) % 7))
-  const weekDates: string[] = []
-  for (let i = 0; i < 7; i++) { const c = new Date(monday); c.setDate(monday.getDate() + i); weekDates.push(`${c.getFullYear()}-${String(c.getMonth() + 1).padStart(2, '0')}-${String(c.getDate()).padStart(2, '0')}`) }
-  const weekRx = new Set(state.tasks.filter((t) => (t.kind === '처방문자' || t.kind === '처방') && weekDates.includes(t.due_on)).map((t) => t.patient_id)).size
-  // 연락 안 됨·재연락·대기
+  const overdue = state.tasks.filter((t) => t.status === '예정' && t.due_on < today)
   const uncontact = state.tasks.filter((t) => (t.kind === '재연락' || t.kind === '연락대기') && t.status === '예정').sort((a, b) => a.due_on.localeCompare(b.due_on))
-  // 완주 임박(현재 블록 남은 처방 1회 이하)
   const nearDone: { p: Patient; prog: string }[] = []
   for (const p of state.patients) {
     const blk = latestBlock(p.id); if (!blk) continue
     const inb = rxInBlock(blk.id).length
     if (inb >= blk.x - 1 && inb <= blk.x) nearDone.push({ p, prog: `${blk.x}-${inb}` })
   }
-  const stat = (label: string, n: number, red = false): string =>
-    `<div class="card" style="text-align:center;min-width:90px${red ? ';border-color:var(--red)' : ''}">${label}<div style="font-size:22px;font-weight:700${red ? ';color:var(--red)' : ''}">${n}</div></div>`
   const needOrder = state.supplyRequests.filter((r) => r.status === '요청').length
   const invWarn = state.inventory.filter((it) => !invStatuses(it, today, state.settings.expiry_warn_days ?? 90).includes('ok')).length
+  // 이번 주 처방 나간 환자 수
+  const d = new Date(); const day = d.getDay(); const monday = new Date(d); monday.setDate(d.getDate() - ((day + 6) % 7))
+  const weekDates: string[] = []
+  for (let i = 0; i < 7; i++) { const c = new Date(monday); c.setDate(monday.getDate() + i); weekDates.push(`${c.getFullYear()}-${String(c.getMonth() + 1).padStart(2, '0')}-${String(c.getDate()).padStart(2, '0')}`) }
+  const weekRx = new Set(state.tasks.filter((t) => (t.kind === '처방문자' || t.kind === '처방') && weekDates.includes(t.due_on)).map((t) => t.patient_id)).size
+
+  // ① 긴급 밴드
+  const alert = (n: number, label: string, cls: string, tab?: string): string =>
+    `<div class="alertcard${n ? ' ' + cls : ''}"${tab ? ` data-tab="${tab}"` : ''}><div class="an">${n}</div><div class="al">${label}</div></div>`
+  const band = alert(overdue.length, '🔴 놓친(밀린) 일', 'red', 'today')
+    + alert(uncontact.length, '📵 연락 안 됨·재연락', 'red', 'uncontactable')
+    + alert(nearDone.length, '🏁 완주 임박', 'amber')
+    + alert(needOrder + invWarn, '📦 물품(주문·부족)', 'amber', needOrder ? 'supply' : 'inventory')
+
+  // ② 메모
+  const memo = `<div class="stepcard">
+    <div class="shead"><span class="snum" style="background:var(--purple);font-size:12px">📝</span><b>우리 메모</b><span class="prog">모두 함께 봄</span></div>
+    <div class="row" style="gap:6px;margin-bottom:6px"><input id="board-note" placeholder="메모 추가 (예: 오후 3시 택배 입고)" style="flex:1;min-width:120px"><button class="btn primary" data-action="addNote">추가</button></div>
+    ${state.boardNotes.length ? state.boardNotes.map((n) => `<div class="dashitem">📌 ${esc(n.text)}<span class="delx" data-action="delNote" data-id="${n.id}" title="삭제">✕</span></div>`).join('') : '<div class="muted" style="font-size:12px">메모 없음 — 위에 적어보세요.</div>'}</div>`
+
+  // ③ 오늘 할 일 — 순서대로
+  const steps = DASH_STEPS.map((st) => {
+    const items = state.tasks.filter((t) => t.due_on === today && st.kinds.includes(t.kind) && (t.status === '예정' || t.status === '완료'))
+    const dn = items.filter((t) => t.status === '완료').length
+    const rows = items.map((t) => {
+      const done = t.status === '완료'
+      let smsBtn = ''
+      if (!done && (t.kind === '처방문자' || t.kind === '마무리문자1' || t.kind === '마무리문자2')) {
+        const pt = t.patient_id ? patientById(t.patient_id) : undefined
+        if (pt && pt.phone) smsBtn = `<button class="btn primary" style="padding:1px 8px;font-size:12px;margin-left:auto" data-action="sms" data-phone="${pt.phone.replace(/[^0-9]/g, '')}" data-body="${smsBody(t.kind)}">📩 문자</button>`
+      }
+      return `<div class="dashitem${done ? ' done' : ''}"><input type="checkbox" data-action="toggleDone" data-id="${t.id}"${done ? ' checked' : ''}> <span>${t.label}</span>${smsBtn}</div>`
+    }).join('')
+    return `<div class="stepcard">
+      <div class="shead"><span class="snum" style="background:${st.color}">${st.num}</span><b>${st.title}</b>
+        <span class="prog">${items.length ? `${dn} / ${items.length} 완료` : '오늘 없음'}</span>${items.length ? `<span class="pbar"><i style="width:${Math.round(dn / items.length * 100)}%"></i></span>` : ''}</div>
+      ${items.length ? rows : '<div class="muted" style="font-size:12px">오늘 없음</div>'}</div>`
+  }).join('')
+
   view.innerHTML = `
-    <h3>오늘 (${today})</h3>
-    <div class="row">
-      ${stat('처방·문자', cnt(todayTasks, '처방문자'))}
-      ${stat('확인전화', cnt(todayTasks, '확인전화'))}
-      ${stat('문진예정', cnt(todayTasks, '문진예정'))}
-      ${stat('재연락', cnt(todayTasks, '재연락'))}
-      ${stat('마무리문자', cnt(todayTasks, '마무리문자1') + cnt(todayTasks, '마무리문자2'))}
-      ${stat('지난(놓친)', overdue.length, true)}
-    </div>
-    ${(needOrder || invWarn) ? `<div class="card" style="border-color:var(--red);margin-top:4px">
-      ${needOrder ? `📦 <b style="color:var(--red)">주문 필요 ${needOrder}건</b> <button class="btn" data-tab="supply">물품신청 보기</button>` : ''}
-      ${invWarn ? ` &nbsp; ⚠️ <b>물품 경고 ${invWarn}건</b>(유효기간·부족) <button class="btn" data-tab="inventory">물품 보기</button>` : ''}
-    </div>` : ''}
-    <h3>연락 안 됨 · 재연락 · 대기 (${uncontact.length})</h3>
-    ${uncontact.length ? uncontact.map((t) => `<div class="task"><span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span> <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}</div>`).join('') : '<p class="muted">없음</p>'}
-    <h3>이번 주 처방 나간 환자 수: <b>${weekRx}</b></h3>
-    <h3>완주 임박 (마지막 회차 다가옴)</h3>
-    ${nearDone.length ? nearDone.map((x) => `<div class="task"><b>${displayName(x.p)}</b> <span class="muted">${x.prog}</span></div>`).join('') : '<p class="muted">없음</p>'}
-    <p class="muted">보는 사람: 원장·데스크 간호사. 오늘 전화·문진할 사람을 여기서 바로 고릅니다.</p>`
+    <h3 style="margin-top:0">오늘 · ${today}</h3>
+    <div class="band">${band}</div>
+    ${memo}
+    <h3>오늘 할 일 — 하는 순서대로</h3>
+    <div class="steps">${steps}</div>
+    <details style="margin-top:14px"><summary class="muted">연락 안 됨·완주 임박 상세 · 이번 주 숫자</summary>
+      <h4 style="margin:10px 0 4px">연락 안 됨·재연락·대기 (${uncontact.length})</h4>
+      ${uncontact.length ? uncontact.map((t) => `<div class="task"><span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span> <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}</div>`).join('') : '<p class="muted">없음</p>'}
+      <h4 style="margin:10px 0 4px">완주 임박 (${nearDone.length})</h4>
+      ${nearDone.length ? nearDone.map((x) => `<div class="task"><b>${displayName(x.p)}</b> <span class="muted">${x.prog}</span></div>`).join('') : '<p class="muted">없음</p>'}
+      <p class="muted">이번 주 처방 나간 환자 수: <b>${weekRx}</b></p>
+    </details>`
 }
 
 // ---------- 달력 ----------
@@ -737,6 +768,22 @@ async function handleClick(e: Event): Promise<void> {
       pushUndo(async () => { await insertRaw('supply_requests', [snap as unknown as Record<string, unknown>]) })
       await deleteSupplyReq(id); await reload()
     }
+    return
+  }
+  // --- 대시보드: 체크 완료/되돌리기, 메모 ---
+  if (action === 'toggleDone') {
+    const tk = state.tasks.find((x) => x.id === id); if (!tk) return
+    await updateTask(id, { status: tk.status === '완료' ? '예정' : '완료' }); await reload(); return
+  }
+  if (action === 'addNote') {
+    const inp = document.getElementById('board-note') as HTMLInputElement | null
+    const text = inp ? inp.value.trim() : ''
+    if (!text) { alert('메모를 입력하세요.'); return }
+    await insertBoardNote(text); await reload(); return
+  }
+  if (action === 'delNote') {
+    const n = state.boardNotes.find((x) => x.id === id)
+    if (n) { const snap = n; pushUndo(async () => { await insertRaw('board_notes', [snap as unknown as Record<string, unknown>]) }); await deleteBoardNote(id); await reload() }
     return
   }
   if (action === 'closeModal') { closeModal(); return }

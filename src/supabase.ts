@@ -1,5 +1,5 @@
 import { createClient, type User } from '@supabase/supabase-js'
-import type { Patient, Block, Prescription, Task, Settings, InventoryItem, SupplyRequest } from './types'
+import type { Patient, Block, Prescription, Task, Settings, InventoryItem, SupplyRequest, BoardNote } from './types'
 
 export const sb = createClient(
   import.meta.env.VITE_SUPABASE_URL as string,
@@ -35,15 +35,17 @@ export async function loadAll(): Promise<{
   tasks: Task[]
   inventory: InventoryItem[]
   supplyRequests: SupplyRequest[]
+  boardNotes: BoardNote[]
 }> {
-  // inventory·supply_requests 표가 아직 없으면 error만 오고 data는 null → []로 처리(앱 안 깨짐)
-  const [patients, blocks, prescriptions, tasks, inventory, supply] = await Promise.all([
+  // 아직 없는 표는 error만 오고 data는 null → []로 처리(앱 안 깨짐)
+  const [patients, blocks, prescriptions, tasks, inventory, supply, notes] = await Promise.all([
     sb.from('patients').select('*').order('name'),
     sb.from('blocks').select('*').order('created_at'),
     sb.from('prescriptions').select('*').order('prescribed_on'),
     sb.from('tasks').select('*').order('due_on'),
     sb.from('inventory').select('*').order('name'),
     sb.from('supply_requests').select('*').order('created_at'),
+    sb.from('board_notes').select('*').order('created_at'),
   ])
   return {
     patients: (patients.data ?? []) as Patient[],
@@ -52,6 +54,7 @@ export async function loadAll(): Promise<{
     tasks: (tasks.data ?? []) as Task[],
     inventory: (inventory.data ?? []) as InventoryItem[],
     supplyRequests: (supply.data ?? []) as SupplyRequest[],
+    boardNotes: (notes.data ?? []) as BoardNote[],
   }
 }
 export async function loadSettings(): Promise<Settings> {
@@ -143,4 +146,12 @@ export async function updateSupplyReq(id: string, patch: Partial<SupplyRequest>)
 }
 export async function deleteSupplyReq(id: string): Promise<void> {
   await sb.from('supply_requests').delete().eq('id', id)
+}
+
+// ---- 대시보드 메모 ----
+export async function insertBoardNote(text: string): Promise<void> {
+  const { error } = await sb.from('board_notes').insert({ text }); if (error) throw error
+}
+export async function deleteBoardNote(id: string): Promise<void> {
+  await sb.from('board_notes').delete().eq('id', id)
 }
