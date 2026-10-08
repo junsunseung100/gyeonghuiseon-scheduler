@@ -78,6 +78,7 @@ export async function loadSettings(): Promise<Settings> {
     no_delivery: (data?.no_delivery ?? []) as string[],
     colors: (data?.colors ?? undefined) as Record<string, string> | undefined,
     expiry_warn_days: (data?.expiry_warn_days ?? undefined) as number | undefined,
+    quick_links: (data?.quick_links ?? undefined) as { label: string; url: string }[] | undefined,
   }
 }
 

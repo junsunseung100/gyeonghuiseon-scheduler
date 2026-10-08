@@ -52,6 +52,7 @@ export interface Settings {
   max_saturday?: number // (사용 안 함) 과거 토요일 문진 제한
   colors?: Record<string, string> // 종류별 색 (간호사가 설정에서 변경, 전 기기 공유)
   expiry_warn_days?: number // 유효기간 임박 경고 일수 (기본 90)
+  quick_links?: { label: string; url: string }[] // 사이드바 바로가기(네이버 톡톡·블로그·홈페이지 등)
 }
 
 export interface InventoryItem {

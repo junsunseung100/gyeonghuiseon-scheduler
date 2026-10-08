@@ -134,16 +134,48 @@ async function handlePinEnter(): Promise<void> {
 }
 
 // ---------- 렌더: 앱 ----------
+const NAV_GROUPS: { label?: string; items: [string, string, string][] }[] = [
+  { items: [['dashboard', '📊', '대시보드']] },
+  { label: '일정', items: [['calendar', '📅', '달력'], ['today', '✅', '오늘 할 일'], ['weekly', '📈', '주간 요약']] },
+  { label: '환자', items: [['patients', '👥', '환자'], ['uncontactable', '📵', '연락 안 됨']] },
+  { label: '물품', items: [['inventory', '💊', '물품'], ['supply', '📦', '물품신청']] },
+  { label: '기타', items: [['stats', '📊', '통계'], ['settings', '⚙️', '설정']] },
+]
+function sidebarHtml(): string {
+  const uncontactN = state.tasks.filter((t) => (t.kind === '재연락' || t.kind === '연락대기') && t.status === '예정').length
+  const supplyN = state.supplyRequests.filter((r) => r.status === '요청').length
+  const nbadge = (k: string): string =>
+    (k === 'uncontactable' && uncontactN) ? `<span class="nbadge">${uncontactN}</span>`
+    : (k === 'supply' && supplyN) ? `<span class="nbadge">${supplyN}</span>` : ''
+  const groups = NAV_GROUPS.map((g) =>
+    (g.label ? `<div class="navgroup">${g.label}</div>` : '') +
+    g.items.map(([k, ic, t]) => `<button class="navitem ${state.tab === k ? 'on' : ''}" data-tab="${k}"><span class="ic">${ic}</span> ${t}${nbadge(k)}</button>`).join('')
+  ).join('')
+  const links = state.settings.quick_links ?? []
+  const quick = links.length
+    ? `<div class="navgroup">바로가기</div><div class="quicklinks">${links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">🔗 ${esc(l.label)}</a>`).join('')}</div>`
+    : ''
+  return groups + quick
+}
 function render(): void {
   const root = document.getElementById('root') as HTMLElement
   if (!state.user) { renderPin(root); return }
   root.innerHTML = `
-    <header>
-      <h1>경희선한의원 · 문진일정 달력</h1>
-      <div id="userbar"><span>${state.user.email ?? ''}</span><button class="btn" data-action="undo" title="삭제 되돌리기 (Ctrl+Z)">되돌리기</button><button class="btn" data-action="logout">로그아웃</button></div>
-    </header>
-    <nav id="tabs">${TABS.map(([k, t]) => `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${t}</button>`).join('')}</nav>
-    <main id="view"></main>
+    <div class="app" id="app">
+      <aside class="side">
+        <div class="brand"><span class="logo">경</span>경희선 문진일정</div>
+        ${sidebarHtml()}
+      </aside>
+      <div class="mainwrap">
+        <div class="topbar">
+          <button class="btn menu-toggle" data-action="toggleSide">☰ 메뉴</button>
+          <div class="spacer"></div>
+          <button class="btn" data-action="undo" title="삭제 되돌리기 (Ctrl+Z)">↩ 되돌리기</button>
+          <button class="btn" data-action="logout">로그아웃</button>
+        </div>
+        <div id="view"></div>
+      </div>
+    </div>
     <div id="modal"></div>`
   const view = root.querySelector('#view') as HTMLElement
   if (state.tab === 'dashboard') renderDashboard(view)
@@ -169,6 +201,8 @@ const DASH_STEPS: { num: string; title: string; color: string; kinds: string[] }
 ]
 function renderDashboard(view: HTMLElement): void {
   const today = todayStr()
+  const d = new Date()
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토']
   const overdue = state.tasks.filter((t) => t.status === '예정' && t.due_on < today)
   const uncontact = state.tasks.filter((t) => (t.kind === '재연락' || t.kind === '연락대기') && t.status === '예정').sort((a, b) => a.due_on.localeCompare(b.due_on))
   const nearDone: { p: Patient; prog: string }[] = []
@@ -179,52 +213,85 @@ function renderDashboard(view: HTMLElement): void {
   }
   const needOrder = state.supplyRequests.filter((r) => r.status === '요청').length
   const invWarn = state.inventory.filter((it) => !invStatuses(it, today, state.settings.expiry_warn_days ?? 90).includes('ok')).length
-  // 이번 주 처방 나간 환자 수
-  const d = new Date(); const day = d.getDay(); const monday = new Date(d); monday.setDate(d.getDate() - ((day + 6) % 7))
+  const todayAll = state.tasks.filter((t) => t.due_on === today && (t.status === '예정' || t.status === '완료'))
+  const doneN = todayAll.filter((t) => t.status === '완료').length
+  const totalN = todayAll.length
+  const pct = totalN ? Math.round(doneN / totalN * 100) : 0
+  const kc = (kinds: string[]): number => todayAll.filter((t) => kinds.includes(t.kind)).length
+  const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay() + 6) % 7))
   const weekDates: string[] = []
-  for (let i = 0; i < 7; i++) { const c = new Date(monday); c.setDate(monday.getDate() + i); weekDates.push(`${c.getFullYear()}-${String(c.getMonth() + 1).padStart(2, '0')}-${String(c.getDate()).padStart(2, '0')}`) }
+  for (let i = 0; i < 7; i++) { const c = new Date(mon); c.setDate(mon.getDate() + i); weekDates.push(`${c.getFullYear()}-${String(c.getMonth() + 1).padStart(2, '0')}-${String(c.getDate()).padStart(2, '0')}`) }
   const weekRx = new Set(state.tasks.filter((t) => (t.kind === '처방문자' || t.kind === '처방') && weekDates.includes(t.due_on)).map((t) => t.patient_id)).size
 
-  // ① 긴급 밴드
-  const alert = (n: number, label: string, cls: string, tab?: string): string =>
-    `<div class="alertcard${n ? ' ' + cls : ''}"${tab ? ` data-tab="${tab}"` : ''}><div class="an">${n}</div><div class="al">${label}</div></div>`
-  const band = alert(overdue.length, '🔴 놓친(밀린) 일', 'red', 'today')
-    + alert(uncontact.length, '📵 연락 안 됨·재연락', 'red', 'uncontactable')
-    + alert(nearDone.length, '🏁 완주 임박', 'amber')
-    + alert(needOrder + invWarn, '📦 물품(주문·부족)', 'amber', needOrder ? 'supply' : 'inventory')
+  // 통계 타일 + 완료율 도넛
+  const tile = (l: string, v: number, red = false): string => `<div class="tile${red ? ' red' : ''}"><div class="l">${l}</div><div class="v">${v}</div></div>`
+  const donut = `<div class="tile donut"><div class="ring" style="background:conic-gradient(var(--teal) 0 ${pct}%,#eceff2 ${pct}% 100%)"><i>${pct}%</i></div><div><div class="l">오늘 완료율</div><div class="v" style="font-size:18px">${doneN} / ${totalN}</div></div></div>`
+  const tiles = tile('처방·문자', kc(['처방문자', '처방', '문자'])) + tile('확인전화', kc(['확인전화'])) + tile('문진예정', kc(['문진예정'])) + tile('마무리문자', kc(['마무리문자1', '마무리문자2'])) + tile('놓친(밀린)', overdue.length, true) + donut
 
-  // ② 메모
-  const memo = `<div class="stepcard">
-    <div class="shead"><span class="snum" style="background:var(--purple);font-size:12px">📝</span><b>우리 메모</b><span class="prog">모두 함께 봄</span></div>
-    <div class="row" style="gap:6px;margin-bottom:6px"><input id="board-note" placeholder="메모 추가 (예: 오후 3시 택배 입고)" style="flex:1;min-width:120px"><button class="btn primary" data-action="addNote">추가</button></div>
-    ${state.boardNotes.length ? state.boardNotes.map((n) => `<div class="dashitem">📌 ${esc(n.text)}<span class="delx" data-action="delNote" data-id="${n.id}" title="삭제">✕</span></div>`).join('') : '<div class="muted" style="font-size:12px">메모 없음 — 위에 적어보세요.</div>'}</div>`
+  // 오늘 확인할 것
+  const chk = (ic: string, label: string, n: number, tab?: string, alwaysOk = false): string => {
+    const bad = n > 0 && !alwaysOk
+    const txt = bad ? (tab ? '보기' : '확인') : (n ? `${n}` : '정상')
+    return `<div class="chk"${tab ? ` data-tab="${tab}"` : ''}><span class="ic">${ic}</span> ${label} <span class="pill ${bad ? 'do' : 'ok'}">${txt}</span></div>`
+  }
+  const checklist = chk('🔴', `놓친(밀린) 일 ${overdue.length}건`, overdue.length, 'today')
+    + chk('📵', `연락 안 됨·재연락 ${uncontact.length}명`, uncontact.length, 'uncontactable')
+    + chk('🏁', `완주 임박 ${nearDone.length}명`, nearDone.length, undefined, true)
+    + chk('📦', `물품 경고 ${needOrder + invWarn}건`, needOrder + invWarn, needOrder ? 'supply' : 'inventory')
+    + chk('📝', `우리 메모 ${state.boardNotes.length}개`, state.boardNotes.length, undefined, true)
 
-  // ③ 오늘 할 일 — 순서대로
+  // 오늘 할 일 단계
   const steps = DASH_STEPS.map((st) => {
-    const items = state.tasks.filter((t) => t.due_on === today && st.kinds.includes(t.kind) && (t.status === '예정' || t.status === '완료'))
+    const items = todayAll.filter((t) => st.kinds.includes(t.kind))
     const dn = items.filter((t) => t.status === '완료').length
     const rows = items.map((t) => {
       const done = t.status === '완료'
       let smsBtn = ''
       if (!done && (t.kind === '처방문자' || t.kind === '마무리문자1' || t.kind === '마무리문자2')) {
         const pt = t.patient_id ? patientById(t.patient_id) : undefined
-        if (pt && pt.phone) smsBtn = `<button class="btn primary" style="padding:1px 8px;font-size:12px;margin-left:auto" data-action="sms" data-phone="${pt.phone.replace(/[^0-9]/g, '')}" data-body="${smsBody(t.kind)}">📩 문자</button>`
+        if (pt && pt.phone) smsBtn = `<button class="btnx p" data-action="sms" data-phone="${pt.phone.replace(/[^0-9]/g, '')}" data-body="${smsBody(t.kind)}">📩 문자</button>`
       }
-      return `<div class="dashitem${done ? ' done' : ''}"><input type="checkbox" data-action="toggleDone" data-id="${t.id}"${done ? ' checked' : ''}> <span>${t.label}</span>${smsBtn}</div>`
+      return `<div class="li${done ? ' done' : ''}"><input type="checkbox" data-action="toggleDone" data-id="${t.id}"${done ? ' checked' : ''}> <span>${t.label}</span>${smsBtn}</div>`
     }).join('')
-    return `<div class="stepcard">
-      <div class="shead"><span class="snum" style="background:${st.color}">${st.num}</span><b>${st.title}</b>
-        <span class="prog">${items.length ? `${dn} / ${items.length} 완료` : '오늘 없음'}</span>${items.length ? `<span class="pbar"><i style="width:${Math.round(dn / items.length * 100)}%"></i></span>` : ''}</div>
-      ${items.length ? rows : '<div class="muted" style="font-size:12px">오늘 없음</div>'}</div>`
+    return `<div class="step">
+      <div class="shead"><span class="snum" style="background:${st.color}">${st.num}</span><b style="font-size:13.5px">${st.title}</b>
+        <span class="sprog">${items.length ? `${dn}/${items.length}` : '오늘 없음'}</span>${items.length ? `<span class="bar"><i style="width:${Math.round(dn / items.length * 100)}%"></i></span>` : ''}</div>
+      ${rows}</div>`
   }).join('')
 
+  // 미니 달력(이번 달)
+  const y = d.getFullYear(), m = d.getMonth()
+  const startDow = new Date(y, m, 1).getDay()
+  const dim = new Date(y, m + 1, 0).getDate()
+  const cntByDay: Record<string, number> = {}
+  for (const t of state.tasks) { if (t.status === '예정' || t.status === '완료') cntByDay[t.due_on] = (cntByDay[t.due_on] ?? 0) + 1 }
+  let cells = ''
+  for (let i = 0; i < startDow; i++) cells += '<div class="d empty"></div>'
+  for (let day = 1; day <= dim; day++) {
+    const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    const n = cntByDay[ds] ?? 0
+    cells += `<div class="d${ds === today ? ' today' : ''}" data-action="pickDay" data-date="${ds}">${day}${n ? `<span class="n">${n}</span>` : ''}</div>`
+  }
+  const mcal = `<div class="card"><h3 class="ch">📅 달력<span class="cnt">날짜를 누르면 그날 할 일</span></h3>
+    <div class="mcal">${dayNames.map((w) => `<div class="h">${w}</div>`).join('')}${cells}</div></div>`
+  const memo = `<div class="card"><h3 class="ch">📝 우리 메모<span class="cnt">모두 함께 봄</span></h3>
+    <div class="row" style="gap:6px"><input id="board-note" placeholder="메모 추가 (예: 오후 3시 택배 입고)" style="flex:1;min-width:120px"><button class="btn primary" data-action="addNote">추가</button></div>
+    <div style="margin-top:6px">${state.boardNotes.length ? state.boardNotes.map((nn) => `<div class="note">📌 ${esc(nn.text)}<span class="delx" data-action="delNote" data-id="${nn.id}" title="삭제">✕</span></div>`).join('') : '<div class="muted">메모 없음 — 위에 적어보세요.</div>'}</div></div>`
+
   view.innerHTML = `
-    <h3 style="margin-top:0">오늘 · ${today}</h3>
-    <div class="band">${band}</div>
-    ${memo}
-    <h3>오늘 할 일 — 하는 순서대로</h3>
-    <div class="steps">${steps}</div>
-    <details style="margin-top:14px"><summary class="muted">연락 안 됨·완주 임박 상세 · 이번 주 숫자</summary>
+    <div class="dash-head">
+      <h1>오늘</h1><span class="date">${y}년 ${m + 1}월 ${d.getDate()}일 (${dayNames[d.getDay()]})</span>
+      <p class="quote">“놓치는 연락 없이, 제때.” — 오늘 처리할 일을 순서대로 확인하세요.</p>
+    </div>
+    <div class="tiles">${tiles}</div>
+    <div class="grid2">
+      <div>
+        <div class="card"><h3 class="ch">✅ 오늘 확인할 것<span class="cnt">${[overdue.length, uncontact.length, needOrder + invWarn].filter((x) => x > 0).length}건 조치 필요</span></h3>${checklist}</div>
+        <div class="card"><h3 class="ch">오늘 할 일 — 하는 순서대로</h3><div class="steps">${steps}</div></div>
+      </div>
+      <div>${mcal}${memo}</div>
+    </div>
+    <details style="margin-top:4px"><summary class="muted">연락 안 됨·완주 임박 상세 · 이번 주 숫자</summary>
       <h4 style="margin:10px 0 4px">연락 안 됨·재연락·대기 (${uncontact.length})</h4>
       ${uncontact.length ? uncontact.map((t) => `<div class="task"><span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span> <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}</div>`).join('') : '<p class="muted">없음</p>'}
       <h4 style="margin:10px 0 4px">완주 임박 (${nearDone.length})</h4>
@@ -543,7 +610,11 @@ function renderSettings(view: HTMLElement): void {
       <div class="row"><input type="date" id="nodDate"><button class="btn primary" data-action="addNoDel">추가</button></div></div>
     <div class="card"><b>약장 유효기간 경고</b>
       <div class="row" style="margin-top:6px">유효기간 <input id="expWarn" type="number" value="${state.settings.expiry_warn_days ?? 90}" style="width:80px"> 일 이내면 '임박' 경고
-      <button class="btn primary" data-action="setExpiryWarn">저장</button></div></div>`
+      <button class="btn primary" data-action="setExpiryWarn">저장</button></div></div>
+    <div class="card"><b>바로가기 링크</b>
+      <p class="muted" style="margin:4px 0">사이드바에 뜹니다(네이버 톡톡·블로그·홈페이지·카카오 채널 등). 모든 기기 공유.</p>
+      ${(state.settings.quick_links ?? []).map((l, i) => `<div class="row" style="margin:4px 0"><span>🔗 <b>${esc(l.label)}</b> <span class="muted">${esc(l.url)}</span></span><button class="btn" data-action="delLink" data-i="${i}" style="margin-left:auto">삭제</button></div>`).join('') || '<span class="muted">아직 없음</span>'}
+      <div class="row" style="margin-top:8px"><input id="lk-label" placeholder="이름(예: 네이버 톡톡)" style="width:150px"><input id="lk-url" placeholder="주소(https://...)" style="width:230px"><button class="btn primary" data-action="addLink">추가</button></div></div>`
 }
 
 // ---------- 처방 생성 공통 ----------
@@ -675,6 +746,20 @@ async function handleClick(e: Event): Promise<void> {
     saveCalFilter(); render(); return
   }
   if (action === 'toggleHideDone') { calFilter.hideDone = !calFilter.hideDone; saveCalFilter(); render(); return }
+  if (action === 'toggleSide') { document.getElementById('app')?.classList.toggle('side-open'); return }
+  if (action === 'addLink') {
+    const label = (document.getElementById('lk-label') as HTMLInputElement).value.trim()
+    let url = (document.getElementById('lk-url') as HTMLInputElement).value.trim()
+    if (!label || !url) { alert('이름과 주소를 모두 입력하세요.'); return }
+    if (!/^https?:\/\//.test(url)) url = 'https://' + url
+    const links = [...(state.settings.quick_links ?? []), { label, url }]
+    await saveSettings({ ...state.settings, quick_links: links }); await reload(); return
+  }
+  if (action === 'delLink') {
+    const i = Number(el.getAttribute('data-i'))
+    const links = (state.settings.quick_links ?? []).filter((_, idx) => idx !== i)
+    await saveSettings({ ...state.settings, quick_links: links }); await reload(); return
+  }
 
   // --- 약장·재고 ---
   if (action === 'addInv') {
