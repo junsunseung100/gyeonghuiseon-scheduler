@@ -1,5 +1,5 @@
 import type { User } from '@supabase/supabase-js'
-import type { Patient, Block, Prescription, Task, Settings, Region, InventoryItem, SupplyRequest, BoardNote } from './types'
+import type { Patient, Block, Prescription, Task, Settings, Region, InventoryItem, SupplyRequest, BoardNote, Reservation } from './types'
 import {
   currentUser, onAuth, signOut, loginWithPin,
   loadAll, loadSettings,
@@ -7,7 +7,9 @@ import {
   updateTask, deleteTask, deleteTasksBy, saveSettings, deletePatient, deletePrescriptionCascade, insertRaw, insertMemo, updatePatient,
   insertInvItem, updateInvItem, deleteInvItem, insertSupplyReq, updateSupplyReq, deleteSupplyReq,
   insertBoardNote, deleteBoardNote,
+  upsertReservations, updateReservation, deleteReservation,
 } from './supabase'
+import { parseReservations, classifyType, RESV_KEYWORDS_DEFAULT } from './reservations'
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
 import { isClinicClosed, isHoliday, holidayName, dow } from './holidays'
@@ -24,18 +26,20 @@ interface State {
   inventory: InventoryItem[]
   supplyRequests: SupplyRequest[]
   boardNotes: BoardNote[]
+  reservations: Reservation[]
   settings: Settings
   tab: string
   year: number
   month: number // 0-11
   pickDate: string // 달력에서 클릭한 날짜
+  resvDate: string // 예약 탭에서 보고 있는 날짜(YYYY-MM-DD)
   unlocked: boolean // PIN 통과 여부
 }
 const now = new Date()
 const state: State = {
-  user: null, patients: [], blocks: [], prescriptions: [], tasks: [], inventory: [], supplyRequests: [], boardNotes: [],
+  user: null, patients: [], blocks: [], prescriptions: [], tasks: [], inventory: [], supplyRequests: [], boardNotes: [], reservations: [],
   settings: { weekly_closed: [0, 4], holidays: [], no_delivery: [] },
-  tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', unlocked: false,
+  tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', resvDate: '', unlocked: false,
 }
 
 // 기본은 차분하게(검정 계열). 간호사가 설정에서 종류별로 색을 바꿀 수 있음(settings.colors).
@@ -101,6 +105,7 @@ async function reload(): Promise<void> {
   state.prescriptions = data.prescriptions; state.tasks = data.tasks
   state.inventory = data.inventory; state.supplyRequests = data.supplyRequests
   state.boardNotes = data.boardNotes
+  state.reservations = data.reservations
   state.settings = s
   render()
 }
@@ -136,7 +141,7 @@ async function handlePinEnter(): Promise<void> {
 // ---------- 렌더: 앱 ----------
 const NAV_GROUPS: { label?: string; items: [string, string, string][] }[] = [
   { items: [['dashboard', '📊', '대시보드']] },
-  { label: '일정', items: [['calendar', '📅', '달력'], ['today', '✅', '오늘 할 일'], ['weekly', '📈', '주간 요약']] },
+  { label: '일정', items: [['calendar', '📅', '달력'], ['today', '✅', '오늘 할 일'], ['weekly', '📈', '주간 요약'], ['reservations', '📒', '예약']] },
   { label: '환자', items: [['patients', '👥', '환자'], ['uncontactable', '📵', '연락 안 됨']] },
   { label: '물품', items: [['inventory', '💊', '물품'], ['supply', '📦', '물품신청']] },
   { label: '기타', items: [['stats', '📊', '통계'], ['settings', '⚙️', '설정']] },
@@ -182,6 +187,7 @@ function render(): void {
   else if (state.tab === 'calendar') renderCalendar(view)
   else if (state.tab === 'today') renderToday(view)
   else if (state.tab === 'weekly') renderWeekly(view)
+  else if (state.tab === 'reservations') renderReservations(view)
   else if (state.tab === 'patients') renderPatients(view)
   else if (state.tab === 'uncontactable') renderUncontactable(view)
   else if (state.tab === 'inventory') renderInventory(view)
@@ -418,6 +424,47 @@ function renderWeekly(view: HTMLElement): void {
   view.innerHTML = `<h3>이번 주 처방 나간 환자</h3>${rows.join('')}`
 }
 
+// ---------- 예약(네이버 복붙) ----------
+const RESV_SMS = '안녕하세요, 경희선한의원입니다. 예약 확인차 연락드립니다. 변경사항 있으시면 알려주세요.'
+function renderReservations(view: HTMLElement): void {
+  const day = state.resvDate || todayStr()
+  const list = state.reservations
+    .filter((r) => r.resv_date === day && r.status !== '취소')
+    .sort((a, b) => a.resv_time.localeCompare(b.resv_time))
+  const rows = list.map((r) => {
+    const herbal = r.type === '한약'
+    const phone = (r.phone || '').replace(/[^0-9]/g, '')
+    const smsBtn = phone ? `<button class="btn" data-action="sms" data-phone="${phone}" data-body="${RESV_SMS}">📩 문자</button>` : ''
+    return `<tr class="${herbal ? 'resv-herbal' : ''}">
+      <td>${esc(r.resv_time)}</td>
+      <td><span class="chip">${esc(r.status)}</span></td>
+      <td>${esc(r.name)}</td>
+      <td>${esc(r.menu)}</td>
+      <td>${esc(r.phone)}</td>
+      <td>${smsBtn} <button class="btn" data-action="toggleResvType" data-id="${r.id}">${herbal ? '침으로' : '한약으로'}</button> <button class="btn" data-action="delResv" data-id="${r.id}">삭제</button></td>
+    </tr>`
+  }).join('')
+  view.innerHTML = `
+    <div class="card">
+      <h3 class="ch">예약 붙여넣기</h3>
+      <p class="muted" style="font-size:13px">네이버 예약자관리 표를 드래그해 복사(Ctrl+C)한 뒤 아래에 붙여넣고(Ctrl+V) [불러오기]를 누르세요. 같은 예약을 또 붙여도 중복되지 않습니다.</p>
+      <textarea id="resvPaste" rows="4" style="width:100%;font-size:13px" placeholder="여기에 붙여넣기"></textarea>
+      <button class="btn primary" data-action="importResv" style="margin-top:8px">불러오기</button>
+    </div>
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn" data-action="resvPrevDay">◀</button>
+        <button class="btn" data-action="resvToday">오늘</button>
+        <b>${day}</b>
+        <button class="btn" data-action="resvNextDay">▶</button>
+        <span class="muted" style="font-size:12px">한약 환자는 노란 줄, 침·미정은 기본색. 줄의 [한약으로/침으로]로 바꿀 수 있어요.</span>
+      </div>
+      ${list.length ? `<table class="tbl">
+        <thead><tr><th>시간</th><th>상태</th><th>이름</th><th>메뉴</th><th>연락처</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table>` : '<p class="muted">이 날 예약 없음</p>'}
+    </div>`
+}
+
 // ---------- 환자 ----------
 function renderPatients(view: HTMLElement): void {
   const cards = state.patients.map((p) => {
@@ -614,7 +661,10 @@ function renderSettings(view: HTMLElement): void {
     <div class="card"><b>바로가기 링크</b>
       <p class="muted" style="margin:4px 0">사이드바에 뜹니다(네이버 톡톡·블로그·홈페이지·카카오 채널 등). 모든 기기 공유.</p>
       ${(state.settings.quick_links ?? []).map((l, i) => `<div class="row" style="margin:4px 0"><span>🔗 <b>${esc(l.label)}</b> <span class="muted">${esc(l.url)}</span></span><button class="btn" data-action="delLink" data-i="${i}" style="margin-left:auto">삭제</button></div>`).join('') || '<span class="muted">아직 없음</span>'}
-      <div class="row" style="margin-top:8px"><input id="lk-label" placeholder="이름(예: 네이버 톡톡)" style="width:150px"><input id="lk-url" placeholder="주소(https://...)" style="width:230px"><button class="btn primary" data-action="addLink">추가</button></div></div>`
+      <div class="row" style="margin-top:8px"><input id="lk-label" placeholder="이름(예: 네이버 톡톡)" style="width:150px"><input id="lk-url" placeholder="주소(https://...)" style="width:230px"><button class="btn primary" data-action="addLink">추가</button></div></div>
+    <div class="card"><b>예약 한약 판정 키워드</b>
+      <p class="muted" style="margin:4px 0">예약 상품명에 이 단어가 들어가면 "한약"으로 색 표시합니다. 쉼표로 구분. ("약침"은 침으로 처리됩니다.)</p>
+      <div class="row" style="margin-top:6px"><input id="resv-kw" style="width:100%" value="${esc((state.settings.resv_keywords ?? RESV_KEYWORDS_DEFAULT).join(', '))}"><button class="btn primary" data-action="setResvKw">저장</button></div></div>`
 }
 
 // ---------- 처방 생성 공통 ----------
@@ -759,6 +809,52 @@ async function handleClick(e: Event): Promise<void> {
     const i = Number(el.getAttribute('data-i'))
     const links = (state.settings.quick_links ?? []).filter((_, idx) => idx !== i)
     await saveSettings({ ...state.settings, quick_links: links }); await reload(); return
+  }
+
+  // --- 예약(네이버 복붙) ---
+  if (action === 'importResv') {
+    const ta = document.getElementById('resvPaste') as HTMLTextAreaElement | null
+    const text = ta?.value ?? ''
+    const parsed = parseReservations(text)
+    if (!parsed.length) { alert('붙여넣은 내용에서 예약을 찾지 못했어요. 네이버 표를 드래그해 복사했는지 확인해 주세요.'); return }
+    const keywords = state.settings.resv_keywords ?? RESV_KEYWORDS_DEFAULT
+    const rows = parsed.map((p) => {
+      const exist = state.reservations.find((r) => r.resv_no === p.resv_no)
+      // 손으로 지정한 종류는 유지, 아니면 상품으로 자동 분류
+      const type = exist?.type_manual ? exist.type : classifyType(p.menu, keywords)
+      return { ...p, type, type_manual: exist?.type_manual ?? false, note: exist?.note ?? '' }
+    })
+    try {
+      await upsertReservations(rows)
+      await reload()
+      alert(`예약 ${rows.length}건을 반영했습니다.`)
+    } catch {
+      alert('예약을 저장하지 못했어요. 예약 표가 아직 준비되지 않았을 수 있습니다(설정 담당자에게 문의).')
+    }
+    return
+  }
+  if (action === 'resvPrevDay') { state.resvDate = addDays(state.resvDate || todayStr(), -1); render(); return }
+  if (action === 'resvNextDay') { state.resvDate = addDays(state.resvDate || todayStr(), 1); render(); return }
+  if (action === 'resvToday') { state.resvDate = todayStr(); render(); return }
+  if (action === 'toggleResvType') {
+    const r = state.reservations.find((x) => x.id === id); if (!r) return
+    const next = r.type === '한약' ? '침' : '한약'
+    await updateReservation(id, { type: next, type_manual: true }); await reload(); return
+  }
+  if (action === 'delResv') {
+    const r = state.reservations.find((x) => x.id === id)
+    if (r && confirm(`${r.name} 예약을 지울까요? (Ctrl+Z로 되돌릴 수 있음)`)) {
+      const snap = r
+      pushUndo(async () => { await insertRaw('reservations', [snap as unknown as Record<string, unknown>]) })
+      await deleteReservation(id); await reload()
+    }
+    return
+  }
+  if (action === 'setResvKw') {
+    const raw = (document.getElementById('resv-kw') as HTMLInputElement).value
+    const kws = raw.split(',').map((s) => s.trim()).filter(Boolean)
+    await saveSettings({ ...state.settings, resv_keywords: kws })
+    alert('키워드를 저장했습니다.'); await reload(); return
   }
 
   // --- 약장·재고 ---
