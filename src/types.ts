@@ -53,6 +53,7 @@ export interface Settings {
   colors?: Record<string, string> // 종류별 색 (간호사가 설정에서 변경, 전 기기 공유)
   expiry_warn_days?: number // 유효기간 임박 경고 일수 (기본 90)
   quick_links?: { label: string; url: string }[] // 사이드바 바로가기(네이버 톡톡·블로그·홈페이지 등)
+  resv_keywords?: string[] // 예약 한약 판정 키워드(기본 한약·첩약·탕약)
 }
 
 export interface InventoryItem {
@@ -80,6 +81,21 @@ export interface SupplyRequest {
   unit: string
   status: '요청' | '확인' | '도착'
   inventory_id?: string | null // 약장 품목과 연결(도착 시 그 품목에 수량 더함)
+  note?: string
+  created_at?: string
+}
+
+export interface Reservation {
+  id: string
+  resv_no: string // 네이버 예약번호(중복 방지 키)
+  name: string
+  phone: string
+  menu: string // 상품명
+  resv_date: string // 이용일 YYYY-MM-DD
+  resv_time: string // 이용시간 HH:MM
+  status: '확정' | '신청' | '취소'
+  type: '한약' | '침' // 자동(상품 키워드) 또는 수동
+  type_manual?: boolean // 손으로 지정 → 재가져오기 때 자동 덮어쓰기 방지
   note?: string
   created_at?: string
 }

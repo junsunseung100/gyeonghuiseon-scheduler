@@ -1,5 +1,5 @@
 import { createClient, type User } from '@supabase/supabase-js'
-import type { Patient, Block, Prescription, Task, Settings, InventoryItem, SupplyRequest, BoardNote } from './types'
+import type { Patient, Block, Prescription, Task, Settings, InventoryItem, SupplyRequest, BoardNote, Reservation } from './types'
 
 export const sb = createClient(
   import.meta.env.VITE_SUPABASE_URL as string,
@@ -49,9 +49,10 @@ export async function loadAll(): Promise<{
   inventory: InventoryItem[]
   supplyRequests: SupplyRequest[]
   boardNotes: BoardNote[]
+  reservations: Reservation[]
 }> {
   // 아직 없는 표는 error만 오고 data는 null → []로 처리(앱 안 깨짐)
-  const [patients, blocks, prescriptions, tasks, inventory, supply, notes] = await Promise.all([
+  const [patients, blocks, prescriptions, tasks, inventory, supply, notes, reservations] = await Promise.all([
     sb.from('patients').select('*').order('name'),
     sb.from('blocks').select('*').order('created_at'),
     sb.from('prescriptions').select('*').order('prescribed_on'),
@@ -59,6 +60,7 @@ export async function loadAll(): Promise<{
     sb.from('inventory').select('*').order('name'),
     sb.from('supply_requests').select('*').order('created_at'),
     sb.from('board_notes').select('*').order('created_at'),
+    sb.from('reservations').select('*').order('resv_date'),
   ])
   return {
     patients: (patients.data ?? []) as Patient[],
@@ -68,6 +70,7 @@ export async function loadAll(): Promise<{
     inventory: (inventory.data ?? []) as InventoryItem[],
     supplyRequests: (supply.data ?? []) as SupplyRequest[],
     boardNotes: (notes.data ?? []) as BoardNote[],
+    reservations: (reservations.data ?? []) as Reservation[],
   }
 }
 export async function loadSettings(): Promise<Settings> {
@@ -79,6 +82,7 @@ export async function loadSettings(): Promise<Settings> {
     colors: (data?.colors ?? undefined) as Record<string, string> | undefined,
     expiry_warn_days: (data?.expiry_warn_days ?? undefined) as number | undefined,
     quick_links: (data?.quick_links ?? undefined) as { label: string; url: string }[] | undefined,
+    resv_keywords: (data?.resv_keywords ?? undefined) as string[] | undefined,
   }
 }
 
@@ -168,4 +172,17 @@ export async function insertBoardNote(text: string): Promise<void> {
 }
 export async function deleteBoardNote(id: string): Promise<void> {
   await sb.from('board_notes').delete().eq('id', id)
+}
+
+// ---- 예약(네이버 복붙) ----
+export async function upsertReservations(rows: Omit<Reservation, 'id' | 'created_at'>[]): Promise<void> {
+  if (!rows.length) return
+  const { error } = await sb.from('reservations').upsert(rows, { onConflict: 'resv_no' })
+  if (error) throw error
+}
+export async function updateReservation(id: string, patch: Partial<Reservation>): Promise<void> {
+  const { error } = await sb.from('reservations').update(patch).eq('id', id); if (error) throw error
+}
+export async function deleteReservation(id: string): Promise<void> {
+  await sb.from('reservations').delete().eq('id', id)
 }
