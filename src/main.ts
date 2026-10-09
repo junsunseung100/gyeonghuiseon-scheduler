@@ -61,6 +61,10 @@ try {
 function saveCalFilter(): void {
   try { localStorage.setItem('calFilter', JSON.stringify({ hidden: [...calFilter.hidden], hideDone: calFilter.hideDone })) } catch { /* 무시 */ }
 }
+// '오늘 할 일' 탭 접기/펼치기(이 기기에만 저장). 기본: 오늘 할 일만 펼침
+const todaySec: { today: boolean; soon: boolean; supply: boolean } = { today: true, soon: false, supply: false }
+try { const raw = localStorage.getItem('todaySec'); if (raw) Object.assign(todaySec, JSON.parse(raw)) } catch { /* 무시 */ }
+function saveTodaySec(): void { try { localStorage.setItem('todaySec', JSON.stringify(todaySec)) } catch { /* 무시 */ } }
 const TABS: [string, string][] = [
   ['dashboard', '대시보드'], ['calendar', '달력'], ['today', '오늘 할 일'], ['weekly', '주간 요약'],
   ['patients', '환자'], ['uncontactable', '연락 안 됨'], ['inventory', '물품'], ['supply', '물품신청'], ['stats', '통계'], ['settings', '설정'],
@@ -391,20 +395,49 @@ function taskLine(t: Task, overdue: boolean): string {
     <b>${t.label}</b> <span class="muted">${t.due_on}</span>${t.note ? ` <span class="badge">${t.note}</span>` : ''}
     <div style="margin-top:4px">${taskActions(t)}</div></div>`
 }
+const INV_STATUS_LABEL: Record<string, string> = { expired: '만료', expiring: '임박', low: '부족' }
 function renderToday(view: HTMLElement): void {
   const today = todayStr()
   const open = state.tasks.filter((t) => t.status !== '완료' && t.status !== '취소' && t.status !== '대기' && t.status !== '연락안됨')
+  // 오늘 것은 하는 순서(처방→확인전화→문진→마무리→재연락)대로 정렬
+  const stepOrder = (k: string): number => { const i = DASH_STEPS.findIndex((s) => s.kinds.includes(k)); return i < 0 ? 99 : i }
+  const todayTasks = open.filter((t) => t.due_on === today).sort((a, b) => stepOrder(a.kind) - stepOrder(b.kind))
   const past = open.filter((t) => t.due_on < today).sort((a, b) => a.due_on.localeCompare(b.due_on))
-  const now2 = open.filter((t) => t.due_on === today)
   const soonMax = (() => { const d = new Date(); d.setDate(d.getDate() + 4); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })()
   const soon = open.filter((t) => t.due_on > today && t.due_on <= soonMax).sort((a, b) => a.due_on.localeCompare(b.due_on))
-  const col = (title: string, arr: Task[], overdue: boolean): string =>
-    `<div class="todaycol"><h3>${title}</h3>${arr.length ? arr.map((t) => taskLine(t, overdue)).join('') : '<p class="muted">없음</p>'}</div>`
-  view.innerHTML = `<div class="today3">
-    ${col('지난 일 (놓친 것)', past, true)}
-    ${col('오늘', now2, false)}
-    ${col('다가오는 4일', soon, false)}
-  </div>`
+  // 물품 경고(부족·유효기간 만료/임박)
+  const warn = state.settings.expiry_warn_days ?? 90
+  const alerts = state.inventory
+    .map((it) => ({ it, st: invStatuses(it, today, warn).filter((s) => s !== 'ok') }))
+    .filter((x) => x.st.length > 0)
+  const notes = state.boardNotes
+
+  const sub = (title: string): string => `<div class="muted" style="font-size:12px;font-weight:700;margin:10px 0 4px">${title}</div>`
+  const listOr = (arr: Task[], overdue: boolean, empty: string): string =>
+    arr.length ? arr.map((t) => taskLine(t, overdue)).join('') : `<p class="muted">${empty}</p>`
+
+  const todayBody = sub('오늘 순서대로') + listOr(todayTasks, false, '오늘 할 일 없음')
+    + sub('미뤄져서 오늘 꼭 해야 하는 일') + listOr(past, true, '놓친 일 없음')
+  const soonBody = soon.length ? soon.map((t) => taskLine(t, false)).join('') : '<p class="muted">미리 당겨서 할 일 없음</p>'
+  const supplyBody = sub('물품 경고')
+    + (alerts.length
+      ? alerts.map(({ it, st }) => `<div class="task"><span class="chip" style="background:var(--red)">${st.map((s) => INV_STATUS_LABEL[s]).join('·')}</span> <b>${esc(it.name)}</b> <span class="muted">${it.qty}${esc(it.unit || '')}${it.expiry ? ' · ' + esc(it.expiry) : ''}</span> <button class="btn" data-tab="inventory">물품 보기</button></div>`).join('')
+      : '<p class="muted">물품 경고 없음</p>')
+    + sub('우리 메모')
+    + (notes.length ? notes.map((n) => `<div class="task">📝 ${esc(n.text)}</div>`).join('') : '<p class="muted">메모 없음</p>')
+
+  const sec = (key: 'today' | 'soon' | 'supply', title: string, count: number, body: string): string => `
+    <div class="card">
+      <div class="acc-head" data-action="toggleTodaySec" data-sec="${key}">
+        <b>${title}</b><span class="sprog">${count}</span><span class="acc-ar">${todaySec[key] ? '▾' : '▸'}</span>
+      </div>
+      ${todaySec[key] ? `<div class="acc-body">${body}</div>` : ''}
+    </div>`
+
+  view.innerHTML =
+    sec('today', '오늘 할 일', todayTasks.length + past.length, todayBody) +
+    sec('soon', '다가올 일 (미리 당겨서)', soon.length, soonBody) +
+    sec('supply', '물품 · 메모', alerts.length + notes.length, supplyBody)
 }
 
 // ---------- 주간 요약 (처방 나간 날만, 요일별) ----------
@@ -796,6 +829,7 @@ async function handleClick(e: Event): Promise<void> {
     saveCalFilter(); render(); return
   }
   if (action === 'toggleHideDone') { calFilter.hideDone = !calFilter.hideDone; saveCalFilter(); render(); return }
+  if (action === 'toggleTodaySec') { const s = el.getAttribute('data-sec') as 'today' | 'soon' | 'supply'; todaySec[s] = !todaySec[s]; saveTodaySec(); render(); return }
   if (action === 'toggleSide') { document.getElementById('app')?.classList.toggle('side-open'); return }
   if (action === 'addLink') {
     const label = (document.getElementById('lk-label') as HTMLInputElement).value.trim()
