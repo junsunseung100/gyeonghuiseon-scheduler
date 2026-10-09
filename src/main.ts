@@ -1183,7 +1183,7 @@ async function handleClick(e: Event): Promise<void> {
     return
   }
   if (action === 'nocontact') {
-    const rc = buildRecontact(t, t.attempt + 1)
+    const rc = buildRecontact(t, t.attempt + 1, state.settings)
     await updateTask(t.id, { status: '연락안됨' })
     await insertTasks([rc])
     const [yy, mm] = rc.due_on.split('-').map(Number)
@@ -1194,7 +1194,7 @@ async function handleClick(e: Event): Promise<void> {
   }
   if (action === 'willcall') {
     const rd = prompt('환자가 연락 주기로 한 날 / 예상 소진일 (YYYY-MM-DD)', todayStr())
-    if (rd) { await updateTask(t.id, { status: '대기' }); await insertTasks([buildWaitRevival(t, rd)]); await reload() }
+    if (rd) { await updateTask(t.id, { status: '대기' }); await insertTasks([buildWaitRevival(t, rd, state.settings)]); await reload() }
     return
   }
   if (action === 'visited') {
