@@ -167,8 +167,8 @@ export async function deleteSupplyReq(id: string): Promise<void> {
 }
 
 // ---- 대시보드 메모 ----
-export async function insertBoardNote(text: string): Promise<void> {
-  const { error } = await sb.from('board_notes').insert({ text }); if (error) throw error
+export async function insertBoardNote(text: string, note_date: string | null): Promise<void> {
+  const { error } = await sb.from('board_notes').insert({ text, note_date }); if (error) throw error
 }
 export async function deleteBoardNote(id: string): Promise<void> {
   await sb.from('board_notes').delete().eq('id', id)

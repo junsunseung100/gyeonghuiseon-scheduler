@@ -71,6 +71,7 @@ export interface InventoryItem {
 export interface BoardNote {
   id: string
   text: string
+  note_date?: string | null // 이 메모가 해당하는 날짜 YYYY-MM-DD (없으면 상시)
   created_at?: string
 }
 

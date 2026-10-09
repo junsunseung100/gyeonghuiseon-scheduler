@@ -203,6 +203,7 @@ function render(): void {
 
 // ---------- 대시보드 (하루 일의 흐름) ----------
 function esc(s: string): string { return s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string)) }
+function noteDateLabel(nd?: string | null): string { if (!nd) return '상시'; const p = nd.split('-'); return `${Number(p[1])}/${Number(p[2])}` }
 const DASH_STEPS: { num: string; title: string; color: string; kinds: string[] }[] = [
   { num: '1', title: '📩 처방·문자', color: 'var(--brown)', kinds: ['처방문자', '처방', '문자'] },
   { num: '2', title: '📞 확인전화', color: 'var(--blue)', kinds: ['확인전화'] },
@@ -293,9 +294,10 @@ function renderDashboard(view: HTMLElement): void {
   }
   const mcal = `<div class="card"><h3 class="ch">📅 달력<span class="cnt">날짜를 누르면 위 '할 일'이 그날로 바뀜</span></h3>
     <div class="mcal">${dayNames.map((w) => `<div class="h">${w}</div>`).join('')}${cells}</div></div>`
-  const memo = `<div class="card"><h3 class="ch">📝 우리 메모<span class="cnt">모두 함께 봄</span></h3>
-    <div class="row" style="gap:6px"><input id="board-note" placeholder="메모 추가 (예: 오후 3시 택배 입고)" style="flex:1;min-width:120px"><button class="btn primary" data-action="addNote">추가</button></div>
-    <div style="margin-top:6px">${state.boardNotes.length ? state.boardNotes.map((nn) => `<div class="note">📌 ${esc(nn.text)}<span class="delx" data-action="delNote" data-id="${nn.id}" title="삭제">✕</span></div>`).join('') : '<div class="muted">메모 없음 — 위에 적어보세요.</div>'}</div></div>`
+  const sortedNotes = [...state.boardNotes].sort((a, b) => (a.note_date || '9999').localeCompare(b.note_date || '9999'))
+  const memo = `<div class="card"><h3 class="ch">📝 우리 메모<span class="cnt">${selLabel}에 적힘 · 모두 함께 봄</span></h3>
+    <div class="row" style="gap:6px"><input id="board-note" placeholder="${selLabel} 할 일·메모 (미리 적어둘 수 있어요)" style="flex:1;min-width:120px"><button class="btn primary" data-action="addNote">추가</button></div>
+    <div style="margin-top:6px">${sortedNotes.length ? sortedNotes.map((nn) => `<div class="note${nn.note_date === sel ? ' note-sel' : ''}"><span class="ndate">${noteDateLabel(nn.note_date)}</span> ${esc(nn.text)}<span class="delx" data-action="delNote" data-id="${nn.id}" title="삭제">✕</span></div>`).join('') : '<div class="muted">메모 없음 — 위에 적어보세요.</div>'}</div></div>`
 
   view.innerHTML = `
     <div class="dash-head">
@@ -338,12 +340,14 @@ function renderCalendar(view: HTMLElement): void {
       const dot = done ? '#a0aec0' : colorOf(t.kind)
       return `<span class="calchip${done ? ' done' : ''}" style="--dot:${dot}"${done ? ' title="완료"' : ''}>${t.label}</span>`
     }).join('')
-    const closed = isClinicClosed(ds, state.settings)
-    const hn = holidayName(ds, state.settings)
+    // 일요일·공휴일은 표시(회색·공휴일 이름) 안 함. 목·토 정기휴진만 회색.
+    const isSun = dow(ds) === 0
+    const isHol = isHoliday(ds, state.settings)
+    const closed = isClinicClosed(ds, state.settings) && !isSun && !isHol
     const noDel = state.settings.no_delivery.includes(ds)
     const count = dayTasks.length > 6 ? `<span class="cellcount">${dayTasks.length}건 · 스크롤 ↕</span>` : ''
     cells.push(`<td class="${closed ? 'closed' : ''} ${ds === todayStr() ? 'today' : ''}" data-action="pickDay" data-date="${ds}">
-      <div class="daynum">${d}${hn ? ` <span class="holiday">${hn}</span>` : ''}${noDel ? ' <span class="holiday">택배불가</span>' : ''} ${count}</div>
+      <div class="daynum">${d}${noDel ? ' <span class="holiday">택배불가</span>' : ''} ${count}</div>
       <div class="cellbox">${chips}</div></td>`)
   }
   const rows: string[] = []
@@ -434,7 +438,7 @@ function renderToday(view: HTMLElement): void {
       ? alerts.map(({ it, st }) => `<div class="task"><span class="chip" style="background:var(--red)">${st.map((s) => INV_STATUS_LABEL[s]).join('·')}</span> <b>${esc(it.name)}</b> <span class="muted">${it.qty}${esc(it.unit || '')}${it.expiry ? ' · ' + esc(it.expiry) : ''}</span> <button class="btn" data-tab="inventory">물품 보기</button></div>`).join('')
       : '<p class="muted">물품 경고 없음</p>')
     + sub('우리 메모')
-    + (notes.length ? notes.map((n) => `<div class="task">📝 ${esc(n.text)}</div>`).join('') : '<p class="muted">메모 없음</p>')
+    + (notes.length ? [...notes].sort((a, b) => (a.note_date || '9999').localeCompare(b.note_date || '9999')).map((n) => `<div class="task"><span class="ndate">${noteDateLabel(n.note_date)}</span> ${esc(n.text)}</div>`).join('') : '<p class="muted">메모 없음</p>')
 
   const sec = (key: 'today' | 'soon' | 'supply', title: string, count: number, body: string): string => `
     <div class="card">
@@ -986,7 +990,7 @@ async function handleClick(e: Event): Promise<void> {
     const inp = document.getElementById('board-note') as HTMLInputElement | null
     const text = inp ? inp.value.trim() : ''
     if (!text) { alert('메모를 입력하세요.'); return }
-    await insertBoardNote(text); await reload(); return
+    await insertBoardNote(text, state.dashDate || todayStr()); await reload(); return
   }
   if (action === 'delNote') {
     const n = state.boardNotes.find((x) => x.id === id)
