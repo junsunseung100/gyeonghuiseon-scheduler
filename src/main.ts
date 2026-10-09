@@ -33,13 +33,14 @@ interface State {
   month: number // 0-11
   pickDate: string // 달력에서 클릭한 날짜
   resvDate: string // 예약 탭에서 보고 있는 날짜(YYYY-MM-DD)
+  dashDate: string // 대시보드에서 보고 있는 날짜(빈값=오늘)
   unlocked: boolean // PIN 통과 여부
 }
 const now = new Date()
 const state: State = {
   user: null, patients: [], blocks: [], prescriptions: [], tasks: [], inventory: [], supplyRequests: [], boardNotes: [], reservations: [],
   settings: { weekly_closed: [0, 4], holidays: [], no_delivery: [] },
-  tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', resvDate: '', unlocked: false,
+  tab: 'dashboard', year: now.getFullYear(), month: now.getMonth(), pickDate: '', resvDate: '', dashDate: '', unlocked: false,
 }
 
 // 기본은 차분하게(검정 계열). 간호사가 설정에서 종류별로 색을 바꿀 수 있음(settings.colors).
@@ -213,6 +214,11 @@ function renderDashboard(view: HTMLElement): void {
   const today = todayStr()
   const d = new Date()
   const dayNames = ['일', '월', '화', '수', '목', '금', '토']
+  // 보고 있는 날짜(빈값이면 오늘). 미니 달력에서 날짜를 누르면 이 값이 바뀜
+  const sel = state.dashDate || today
+  const isToday = sel === today
+  const selD = new Date(sel + 'T00:00:00')
+  const selLabel = isToday ? '오늘' : `${selD.getMonth() + 1}월 ${selD.getDate()}일 (${dayNames[selD.getDay()]})`
   const overdue = state.tasks.filter((t) => t.status === '예정' && t.due_on < today)
   const uncontact = state.tasks.filter((t) => (t.kind === '재연락' || t.kind === '연락대기') && t.status === '예정').sort((a, b) => a.due_on.localeCompare(b.due_on))
   const nearDone: { p: Patient; prog: string }[] = []
@@ -223,7 +229,7 @@ function renderDashboard(view: HTMLElement): void {
   }
   const needOrder = state.supplyRequests.filter((r) => r.status === '요청').length
   const invWarn = state.inventory.filter((it) => !invStatuses(it, today, state.settings.expiry_warn_days ?? 90).includes('ok')).length
-  const todayAll = state.tasks.filter((t) => t.due_on === today && (t.status === '예정' || t.status === '완료'))
+  const todayAll = state.tasks.filter((t) => t.due_on === sel && (t.status === '예정' || t.status === '완료'))
   const doneN = todayAll.filter((t) => t.status === '완료').length
   const totalN = todayAll.length
   const pct = totalN ? Math.round(doneN / totalN * 100) : 0
@@ -235,7 +241,7 @@ function renderDashboard(view: HTMLElement): void {
 
   // 통계 타일 + 완료율 도넛
   const tile = (l: string, v: number, red = false): string => `<div class="tile${red ? ' red' : ''}"><div class="l">${l}</div><div class="v">${v}</div></div>`
-  const donut = `<div class="tile donut"><div class="ring" style="background:conic-gradient(var(--teal) 0 ${pct}%,#eceff2 ${pct}% 100%)"><i>${pct}%</i></div><div><div class="l">오늘 완료율</div><div class="v" style="font-size:18px">${doneN} / ${totalN}</div></div></div>`
+  const donut = `<div class="tile donut"><div class="ring" style="background:conic-gradient(var(--teal) 0 ${pct}%,#eceff2 ${pct}% 100%)"><i>${pct}%</i></div><div><div class="l">${isToday ? '오늘' : selLabel} 완료율</div><div class="v" style="font-size:18px">${doneN} / ${totalN}</div></div></div>`
   const tiles = tile('처방·문자', kc(['처방문자', '처방', '문자'])) + tile('확인전화', kc(['확인전화'])) + tile('문진예정', kc(['문진예정'])) + tile('마무리문자', kc(['마무리문자1', '마무리문자2'])) + tile('놓친(밀린)', overdue.length, true) + donut
 
   // 오늘 확인할 것
@@ -244,7 +250,10 @@ function renderDashboard(view: HTMLElement): void {
     const txt = bad ? (tab ? '보기' : '확인') : (n ? `${n}` : '정상')
     return `<div class="chk"${tab ? ` data-tab="${tab}"` : ''}><span class="ic">${ic}</span> ${label} <span class="pill ${bad ? 'do' : 'ok'}">${txt}</span></div>`
   }
-  const checklist = chk('🔴', `놓친(밀린) 일 ${overdue.length}건`, overdue.length, 'today')
+  // 그날 할 일 요약(선택 날짜 기준)
+  const daySummary = `<div class="chk"><span class="ic">📅</span> ${selLabel} 할 일 ${totalN}건 <span class="pill ${totalN ? (doneN < totalN ? 'do' : 'ok') : 'ok'}">${totalN ? `완료 ${doneN}/${totalN}` : '없음'}</span></div>`
+  const checklist = daySummary
+    + chk('🔴', `놓친(밀린) 일 ${overdue.length}건`, overdue.length, 'today')
     + chk('📵', `연락 안 됨·재연락 ${uncontact.length}명`, uncontact.length, 'uncontactable')
     + chk('🏁', `완주 임박 ${nearDone.length}명`, nearDone.length, undefined, true)
     + chk('📦', `물품 경고 ${needOrder + invWarn}건`, needOrder + invWarn, needOrder ? 'supply' : 'inventory')
@@ -280,9 +289,9 @@ function renderDashboard(view: HTMLElement): void {
   for (let day = 1; day <= dim; day++) {
     const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     const n = cntByDay[ds] ?? 0
-    cells += `<div class="d${ds === today ? ' today' : ''}" data-action="pickDay" data-date="${ds}">${day}${n ? `<span class="n">${n}</span>` : ''}</div>`
+    cells += `<div class="d${ds === today ? ' today' : ''}${ds === sel ? ' sel' : ''}" data-action="dashPick" data-date="${ds}">${day}${n ? `<span class="n">${n}</span>` : ''}</div>`
   }
-  const mcal = `<div class="card"><h3 class="ch">📅 달력<span class="cnt">날짜를 누르면 그날 할 일</span></h3>
+  const mcal = `<div class="card"><h3 class="ch">📅 달력<span class="cnt">날짜를 누르면 위 '할 일'이 그날로 바뀜</span></h3>
     <div class="mcal">${dayNames.map((w) => `<div class="h">${w}</div>`).join('')}${cells}</div></div>`
   const memo = `<div class="card"><h3 class="ch">📝 우리 메모<span class="cnt">모두 함께 봄</span></h3>
     <div class="row" style="gap:6px"><input id="board-note" placeholder="메모 추가 (예: 오후 3시 택배 입고)" style="flex:1;min-width:120px"><button class="btn primary" data-action="addNote">추가</button></div>
@@ -290,14 +299,15 @@ function renderDashboard(view: HTMLElement): void {
 
   view.innerHTML = `
     <div class="dash-head">
-      <h1>오늘</h1><span class="date">${y}년 ${m + 1}월 ${d.getDate()}일 (${dayNames[d.getDay()]})</span>
-      <p class="quote">“놓치는 연락 없이, 제때.” — 오늘 처리할 일을 순서대로 확인하세요.</p>
+      <h1>${isToday ? '오늘' : selLabel}</h1><span class="date">${selD.getFullYear()}년 ${selD.getMonth() + 1}월 ${selD.getDate()}일 (${dayNames[selD.getDay()]})</span>
+      ${isToday ? '' : '<button class="btn" data-action="dashToday" style="margin-left:8px">↩ 오늘로</button>'}
+      <p class="quote">“놓치는 연락 없이, 제때.” — ${isToday ? '오늘' : '그날'} 처리할 일을 순서대로 확인하세요.</p>
     </div>
     <div class="tiles">${tiles}</div>
     <div class="grid2">
       <div>
-        <div class="card"><h3 class="ch">✅ 오늘 확인할 것<span class="cnt">${[overdue.length, uncontact.length, needOrder + invWarn].filter((x) => x > 0).length}건 조치 필요</span></h3>${checklist}</div>
-        <div class="card"><h3 class="ch">오늘 할 일 — 하는 순서대로</h3><div class="steps">${steps}</div></div>
+        <div class="card"><h3 class="ch">✅ ${isToday ? '오늘' : selLabel} 확인할 것<span class="cnt">${[overdue.length, uncontact.length, needOrder + invWarn].filter((x) => x > 0).length}건 조치 필요</span></h3>${checklist}</div>
+        <div class="card"><h3 class="ch">${isToday ? '오늘' : selLabel} 할 일 — 하는 순서대로</h3><div class="steps">${steps}</div></div>
       </div>
       <div>${mcal}${memo}</div>
     </div>
@@ -794,7 +804,7 @@ async function handleClick(e: Event): Promise<void> {
   const el = (e.target as HTMLElement).closest('[data-action],[data-tab]') as HTMLElement | null
   if (!el) return
   const tab = el.getAttribute('data-tab')
-  if (tab) { state.tab = tab; render(); return }
+  if (tab) { state.tab = tab; if (tab === 'dashboard') state.dashDate = ''; render(); return }
   const action = el.getAttribute('data-action')!
   const id = el.getAttribute('data-id') ?? ''
   const t = state.tasks.find((x) => x.id === id)
@@ -823,6 +833,9 @@ async function handleClick(e: Event): Promise<void> {
 
   // 달력 날짜 클릭 → 팝업
   if (action === 'pickDay') { openDayModal(el.getAttribute('data-date')!); return }
+  // 대시보드 미니 달력: 그 날짜 기준으로 대시보드를 바꿈(팝업 아님)
+  if (action === 'dashPick') { state.dashDate = el.getAttribute('data-date')!; render(); return }
+  if (action === 'dashToday') { state.dashDate = ''; render(); return }
   if (action === 'toggleKind') {
     const k = el.getAttribute('data-kind')!
     if (calFilter.hidden.has(k)) calFilter.hidden.delete(k); else calFilter.hidden.add(k)
