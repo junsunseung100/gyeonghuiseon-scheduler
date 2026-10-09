@@ -1,5 +1,5 @@
 import type { Settings } from './types'
-import { isClinicClosed, isMsgBlocked } from './holidays'
+import { isClinicClosed, isMsgBlocked, isCallBlocked } from './holidays'
 
 export function addDays(date: string, n: number): string {
   const d = new Date(date + 'T00:00:00')
@@ -19,9 +19,19 @@ export function nextClinicDay(date: string, s: Settings): string {
   return cur
 }
 
+// 확인전화·재연락용: 토요일은 허용하고 목·일·공휴일만 건너뜀
+export function nextCallDay(date: string, s: Settings): string {
+  let cur = date
+  for (let i = 0; i < 30; i++) {
+    if (!isCallBlocked(cur, s)) return cur
+    cur = addDays(cur, 1)
+  }
+  return cur
+}
+
 export function confirmCallDate(prescribedOn: string, s: Settings): string {
   const base = addDays(prescribedOn, 1)
-  return nextClinicDay(base, s) // 휴진이면 다음 진료일로
+  return nextCallDay(base, s) // 목·일·공휴일이면 다음 가능일로(토요일은 가능)
 }
 
 export function followupDate(prescribedOn: string, s: Settings): string {

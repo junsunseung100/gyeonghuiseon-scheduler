@@ -30,9 +30,15 @@ test('재연락이 목요일에 걸리면 금요일로(간호사 없음)', () =>
   expect(r.due_on).toBe('2026-10-02')
 })
 
-test('재연락이 토·일에 걸리면 다음 진료일(월)로', () => {
+test('재연락이 토요일에 걸리면 그대로(토요일 전화는 가능)', () => {
   const prev = { ...base, due_on: '2026-10-07' } // 수
-  const r = buildRecontact(prev, 1, s) // +3=10-10(토) → 10-12(월)
+  const r = buildRecontact(prev, 1, s) // +3=10-10(토) → 그대로 10-10
+  expect(r.due_on).toBe('2026-10-10')
+})
+
+test('재연락이 일요일에 걸리면 월요일로', () => {
+  const prev = { ...base, due_on: '2026-10-08' } // 목
+  const r = buildRecontact(prev, 1, s) // +3=10-11(일) → 10-12(월)
   expect(r.due_on).toBe('2026-10-12')
 })
 

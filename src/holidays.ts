@@ -21,9 +21,16 @@ export function isHoliday(date: string, s: Settings): boolean {
   return holidayName(date, s) !== null
 }
 
-// 원내 직원이 필요한 일(확인전화·문진)이 불가한 날: 매주 휴진(일·목) + 토요일 + 공휴일
+// 한약문진(문진예정)이 불가한 날: 매주 휴진(일·목) + 토요일 + 공휴일
+// (토요일 한약문진은 피하고, 부득이할 때만 원장이 수동으로 최대 2회)
 export function isClinicClosed(date: string, s: Settings): boolean {
   return s.weekly_closed.includes(dow(date)) || dow(date) === 6 || isHoliday(date, s)
+}
+
+// 간호사 전화(확인전화·재연락)가 불가한 날: 매주 휴진(일·목) + 공휴일.
+// 토요일은 확인전화·재연락 가능(간호사 전화는 토요일에 많이 해도 됨).
+export function isCallBlocked(date: string, s: Settings): boolean {
+  return s.weekly_closed.includes(dow(date)) || isHoliday(date, s)
 }
 
 // 문자·처방이 잡히면 안 되는 날: 토·일·공휴일 전면 제외 (목요일은 예약 발송 가능해서 허용)
