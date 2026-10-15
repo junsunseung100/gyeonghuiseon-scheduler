@@ -12,7 +12,7 @@ import {
 import { parseReservations, classifyType, RESV_KEYWORDS_DEFAULT } from './reservations'
 import { buildManualTask, buildTasksForPrescription, MANUAL_LABEL, saturdayWarning, type ManualKind } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
-import { isClinicClosed, isHoliday, holidayName, dow } from './holidays'
+import { isClinicClosed, isCallBlocked, isHoliday, holidayName, dow } from './holidays'
 import { addDays, monFirstBlanks } from './dates'
 import { invStatuses, sortInventory, isLow } from './inventory'
 
@@ -745,16 +745,17 @@ function openDayModal(ds: string): void {
         <label style="display:block"><input type="checkbox" class="m-del" data-id="${t.id}"> <span class="chip" style="background:${colorOf(t.kind)}">${t.kind}</span> <b>${t.label}</b>${t.status === '완료' ? ' <span class="muted">✓ 완료</span>' : ''}</label>
         <div style="margin-top:4px">${taskActions(t)}</div></div>`).join('')
     : ''
-  // 토·일·공휴일은 일정을 잡지 않음 → 처방 없이 메모만
-  const blocked = dow(ds) === 0 || dow(ds) === 6 || isHoliday(ds, state.settings)
+  // 일·공휴일은 일정을 잡지 않음 → 메모만. 토요일은 처방·문자 가능(간호사 요청 2026-10-15)
+  const blocked = dow(ds) === 0 || isHoliday(ds, state.settings)
+  const satNote = dow(ds) === 6 ? '<p class="muted" style="margin:0 0 8px">토요일 — 처방·문자, 확인전화·다시 연락하기는 넣을 수 있어요. 한약 문진은 되도록 피하세요.</p>' : ''
   const topSection = blocked
-    ? `<p class="muted">${holidayName(ds, state.settings) ?? (dow(ds) === 6 ? '토요일' : '일요일')} — 토·일·공휴일은 일정을 잡지 않습니다. 메모만 남길 수 있어요.</p>
+    ? `<p class="muted">${holidayName(ds, state.settings) ?? '일요일'} — 일요일·공휴일은 일정을 잡지 않습니다. 메모만 남길 수 있어요.</p>
        <div class="row">
          <input id="m-memo" placeholder="메모 (예: 연휴 안내)" style="width:230px">
          <button class="btn primary" data-action="saveMemo" data-date="${ds}">메모 저장</button>
          <button class="btn" data-action="closeModal">닫기</button>
        </div>`
-    : `<div class="row">
+    : `${satNote}<div class="row">
          <input id="m-name" list="patlist" placeholder="환자 이름" style="width:150px" autocomplete="off">
          <datalist id="patlist">${datalist}</datalist>
          <input id="m-birth" style="width:100px" placeholder="생년(동명이인만)">
@@ -1038,7 +1039,8 @@ async function handleClick(e: Event): Promise<void> {
     const disp = birth ? `${name}(${birth})` : name
     const p = state.patients.find((x) => displayName(x) === disp)
     if (!p) { alert('등록된 환자만 넣을 수 있어요. 자동완성에서 고르거나, 새 환자면 먼저 [처방 나감]으로 등록하세요.'); return }
-    if (isClinicClosed(state.pickDate, state.settings) && !confirm(`${state.pickDate}은 휴진일이에요. 그래도 ${MANUAL_LABEL[kind]}을(를) 넣을까요?`)) return
+    const closedFor = kind === '문진예정' ? isClinicClosed(state.pickDate, state.settings) : isCallBlocked(state.pickDate, state.settings)
+    if (closedFor && !confirm(`${state.pickDate}은 ${kind === '문진예정' ? '한약 문진을 피하는 날' : '휴진일'}이에요. 그래도 ${MANUAL_LABEL[kind]}을(를) 넣을까요?`)) return
     const numField = (document.getElementById('m-num') as HTMLInputElement).value.trim()
     const rxs = state.prescriptions.filter((r) => r.patient_id === p.id)
     await insertTasks([buildManualTask(p, kind, state.pickDate, numField, rxs.length ? rxs[rxs.length - 1].id : null)])
