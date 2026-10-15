@@ -13,7 +13,7 @@ import { parseReservations, classifyType, RESV_KEYWORDS_DEFAULT } from './reserv
 import { buildTasksForPrescription, saturdayWarning } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
 import { isClinicClosed, isHoliday, holidayName, dow } from './holidays'
-import { addDays } from './dates'
+import { addDays, monFirstBlanks } from './dates'
 import { invStatuses, sortInventory, isLow } from './inventory'
 
 // ---------- 상태 ----------
@@ -281,7 +281,7 @@ function renderDashboard(view: HTMLElement): void {
 
   // 미니 달력(이번 달)
   const y = d.getFullYear(), m = d.getMonth()
-  const startDow = new Date(y, m, 1).getDay()
+  const startDow = monFirstBlanks(y, m) // 월요일 시작
   const dim = new Date(y, m + 1, 0).getDate()
   const cntByDay: Record<string, number> = {}
   for (const t of state.tasks) { if (t.status === '예정' || t.status === '완료') cntByDay[t.due_on] = (cntByDay[t.due_on] ?? 0) + 1 }
@@ -293,7 +293,7 @@ function renderDashboard(view: HTMLElement): void {
     cells += `<div class="d${ds === today ? ' today' : ''}${ds === sel ? ' sel' : ''}" data-action="dashPick" data-date="${ds}">${day}${n ? `<span class="n">${n}</span>` : ''}</div>`
   }
   const mcal = `<div class="card"><h3 class="ch">📅 달력<span class="cnt">날짜를 누르면 위 '할 일'이 그날로 바뀜</span></h3>
-    <div class="mcal">${dayNames.map((w) => `<div class="h">${w}</div>`).join('')}${cells}</div></div>`
+    <div class="mcal">${MON_FIRST.map((w) => `<div class="h">${w}</div>`).join('')}${cells}</div></div>`
   const sortedNotes = [...state.boardNotes].sort((a, b) => (a.note_date || '9999').localeCompare(b.note_date || '9999'))
   const memo = `<div class="card"><h3 class="ch">📝 우리 메모<span class="cnt">${selLabel}에 적힘 · 모두 함께 봄</span></h3>
     <div class="row" style="gap:6px"><input id="board-note" placeholder="${selLabel} 할 일·메모 (미리 적어둘 수 있어요)" style="flex:1;min-width:120px"><button class="btn primary" data-action="addNote">추가</button></div>
@@ -323,10 +323,10 @@ function renderDashboard(view: HTMLElement): void {
 }
 
 // ---------- 달력 ----------
+const MON_FIRST = ['월', '화', '수', '목', '금', '토', '일']
 function renderCalendar(view: HTMLElement): void {
   const y = state.year, m = state.month
-  const first = new Date(y, m, 1)
-  const startDow = first.getDay()
+  const startDow = monFirstBlanks(y, m) // 월요일 시작(간호사 요청 2026-10-15)
   const daysInMonth = new Date(y, m + 1, 0).getDate()
   const cells: string[] = []
   for (let i = 0; i < startDow; i++) cells.push('<td></td>')
@@ -365,7 +365,7 @@ function renderCalendar(view: HTMLElement): void {
       <button class="btn ${calFilter.hideDone ? 'primary' : ''}" data-action="toggleHideDone">완료 ${calFilter.hideDone ? '숨김 ✓' : '보임'}</button>
     </div>
     <table class="cal">
-      <thead><tr>${['일', '월', '화', '수', '목', '금', '토'].map((w) => `<th>${w}</th>`).join('')}</tr></thead>
+      <thead><tr>${MON_FIRST.map((w) => `<th>${w}</th>`).join('')}</tr></thead>
       <tbody>${rows.join('')}</tbody>
     </table>`
 }

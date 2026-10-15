@@ -78,7 +78,7 @@
 
       /* ---- 달력 탭 ---- */
       table.cal{ width:100%; border-collapse:collapse; table-layout:fixed; background:#fff; border-radius:12px; overflow:hidden; box-shadow:var(--sh); }
-      table.cal th:first-child, table.cal td:first-child{ width:7%; }
+      table.cal th:nth-child(7), table.cal td:nth-child(7){ width:7%; } /* 일요일(월요일 시작이라 맨 끝) */
       table.cal th{ font-size:12px; color:var(--muted); padding:6px; }
       table.cal td{ border:1px solid var(--line); vertical-align:top; height:176px; width:14.2%; padding:3px; font-size:12px; cursor:pointer; }
       table.cal td:hover{ background:#f0f7f6; }

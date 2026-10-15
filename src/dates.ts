@@ -1,6 +1,11 @@
 import type { Settings } from './types'
 import { isClinicClosed, isMsgBlocked, isCallBlocked } from './holidays'
 
+// 월요일 시작 달력: 그 달 1일 앞에 비울 칸 수(월=0 … 일=6) — 간호사 요청 2026-10-15
+export function monFirstBlanks(year: number, month0: number): number {
+  return (new Date(year, month0, 1).getDay() + 6) % 7
+}
+
 export function addDays(date: string, n: number): string {
   const d = new Date(date + 'T00:00:00')
   d.setDate(d.getDate() + n)

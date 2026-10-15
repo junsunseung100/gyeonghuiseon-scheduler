@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest'
-import { addDays, confirmCallDate, followupDate, finalMsg1Date, finalMsg2Date } from '../src/dates'
+import { addDays, monFirstBlanks, confirmCallDate, followupDate, finalMsg1Date, finalMsg2Date } from '../src/dates'
 import type { Settings } from '../src/types'
 
 const s: Settings = { weekly_closed: [0, 4], holidays: [], no_delivery: [] }
@@ -40,4 +40,10 @@ test('마무리 문자 1차 +12(토·일 피함), 2차 1차+10', () => {
   // +12=09-20(일) → 토·일 피해 09-21(월). 목요일은 문자 가능.
   expect(finalMsg1Date('2026-09-08', s)).toBe('2026-09-21')
   expect(finalMsg2Date('2026-09-20', s)).toBe('2026-09-30') // 09-30(수)
+})
+
+test('monFirstBlanks — 월요일 시작 달력의 앞 빈칸', () => {
+  expect(monFirstBlanks(2026, 9)).toBe(3) // 2026-10-01 목요일 → 월·화·수 3칸
+  expect(monFirstBlanks(2026, 5)).toBe(0) // 2026-06-01 월요일
+  expect(monFirstBlanks(2026, 10)).toBe(6) // 2026-11-01 일요일 → 맨 끝 칸
 })
