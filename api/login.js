@@ -1,5 +1,14 @@
 // Vercel 서버 함수: PIN을 서버에서 검사하고, 맞으면 공용 계정으로 로그인해 세션을 돌려준다.
 // 비밀번호·PIN은 서버 환경변수에만 있고 클라이언트 번들에는 없다. 가입(signup)은 막아둔 상태로 동작.
+import { timingSafeEqual } from 'node:crypto'
+
+// 비밀번호 비교: 영문·숫자·특수문자 그대로, 맞는지 걸린 시간으로 새지 않게
+function samePassword(a, b) {
+  const x = Buffer.from(String(a), 'utf8')
+  const y = Buffer.from(String(b), 'utf8')
+  return x.length === y.length && timingSafeEqual(x, y)
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.status(405).json({ error: 'method' }); return }
   let body = req.body
@@ -7,7 +16,7 @@ export default async function handler(req, res) {
   const pin = (body && body.pin) || ''
 
   const APP_PIN = process.env.APP_PIN || ''
-  if (!APP_PIN || String(pin) !== String(APP_PIN)) {
+  if (!APP_PIN || !samePassword(pin, APP_PIN)) {
     res.status(401).json({ error: 'pin' }); return
   }
 

@@ -120,14 +120,24 @@ function renderPin(root: HTMLElement): void {
   root.innerHTML = `
     <div id="login" class="card">
       <h1>경희선한의원 · 문진일정</h1>
-      <p class="muted">4자리 비밀번호(PIN)를 입력하세요.</p>
-      <input id="pinInput" inputmode="numeric" maxlength="4" placeholder="● ● ● ●" style="width:100%;font-size:24px;text-align:center;letter-spacing:8px;padding:8px">
+      <p class="muted">비밀번호를 입력하세요.</p>
+      <!-- 영문·숫자·특수문자 모두 가능. 몇 글자인지 보이지 않게 글자(●)도 숨기고 「입력됨」만 표시 -->
+      <input id="pinInput" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" aria-label="비밀번호" style="width:100%;font-size:18px;padding:8px;color:transparent;caret-color:var(--ink)">
+      <div class="row" style="justify-content:space-between;margin-top:6px"><span id="pinState" class="muted" style="font-size:12px">&nbsp;</span><label class="muted" style="font-size:12px"><input type="checkbox" id="pinShow"> 입력한 글자 보기</label></div>
       <div id="pinErr" style="color:var(--red);font-size:12px;margin-top:8px"></div>
       <button class="btn primary" id="pinBtn" style="margin-top:12px;width:100%;padding:8px" data-action="pinEnter">들어가기</button>
     </div>`
   const inp = root.querySelector('#pinInput') as HTMLInputElement
   inp.focus()
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { void handlePinEnter() } })
+  const st = root.querySelector('#pinState') as HTMLElement
+  inp.addEventListener('input', () => { st.textContent = inp.value ? '입력됨' : '\u00a0' })
+  const show = root.querySelector('#pinShow') as HTMLInputElement
+  show.addEventListener('change', () => {
+    inp.type = show.checked ? 'text' : 'password'
+    inp.style.color = show.checked ? 'var(--ink)' : 'transparent'
+    inp.focus()
+  })
 }
 async function handlePinEnter(): Promise<void> {
   const inp = document.getElementById('pinInput') as HTMLInputElement | null
@@ -135,11 +145,11 @@ async function handlePinEnter(): Promise<void> {
   const btn = document.getElementById('pinBtn') as HTMLButtonElement | null
   const err = document.getElementById('pinErr')
   if (btn) { btn.disabled = true; btn.textContent = '확인 중…' }
-  const ok = await loginWithPin(inp.value.trim())
+  const ok = await loginWithPin(inp.value) // 비밀번호는 있는 그대로(앞뒤 공백도 글자)
   if (ok) { state.user = await currentUser(); await reload() }
   else {
-    if (err) err.textContent = 'PIN이 맞지 않습니다.'
-    inp.value = ''; if (btn) { btn.disabled = false; btn.textContent = '들어가기' }
+    if (err) err.textContent = '비밀번호가 맞지 않습니다.'
+    inp.value = ''; const st = document.getElementById('pinState'); if (st) st.textContent = '\u00a0'; if (btn) { btn.disabled = false; btn.textContent = '들어가기' }
   }
 }
 
@@ -689,8 +699,8 @@ function renderSettings(view: HTMLElement): void {
   const hol = state.settings.holidays.map((h) => `<span class="badge">${h} <button class="btn" data-action="delHoliday" data-date="${h}">x</button></span>`).join(' ')
   const nod = state.settings.no_delivery.map((h) => `<span class="badge">${h} <button class="btn" data-action="delNoDel" data-date="${h}">x</button></span>`).join(' ')
   view.innerHTML = `
-    <div class="card"><b>로그인 PIN</b>
-      <span class="muted">로그인 PIN은 서버에서 안전하게 관리됩니다(여기서 바꾸지 않습니다). 바꾸려면 설정값(APP_PIN)을 고치면 됩니다.</span></div>
+    <div class="card"><b>로그인 비밀번호</b>
+      <span class="muted">비밀번호는 서버에서 안전하게 관리됩니다(여기서 바꾸지 않습니다). 영문·숫자·특수문자 모두 쓸 수 있어요. 바꾸려면 Vercel 환경변수 APP_PIN을 고치고 다시 배포합니다.</span></div>
     <div class="card"><b>매주 휴진 요일</b><div class="row" style="margin-top:6px">${wkBtns}</div><span class="muted">기본: 일·목. 토요일은 항상 일정에서 제외됩니다.</span></div>
     <div class="card"><b>종류별 색</b>
       <p class="muted" style="margin:4px 0">기본은 검정 계열입니다. 원하는 종류의 색을 바꿔 저장하면 모든 기기에 같은 색으로 보입니다.</p>
