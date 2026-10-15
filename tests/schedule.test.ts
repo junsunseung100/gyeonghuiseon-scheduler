@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest'
-import { buildTasksForPrescription, saturdayWarning } from '../src/schedule'
+import { buildManualTask, buildTasksForPrescription, MANUAL_LABEL, saturdayWarning } from '../src/schedule'
 import type { Settings, Patient, Prescription } from '../src/types'
 
 const s: Settings = { weekly_closed: [0, 4], holidays: [], no_delivery: [] }
@@ -49,4 +49,13 @@ test('토요일 + 지방이면 경고', () => {
   const jibang: Patient = { id: 'p2', name: '박**', region: '지방' }
   expect(saturdayWarning(jibang, '2026-09-12')).not.toBeNull() // 토
   expect(saturdayWarning(kim, '2026-09-12')).toBeNull() // 서울
+})
+
+test('buildManualTask — 팝업 번호 그대로, 종류별 한 항목', () => {
+  const lee: Patient = { id: 'p2', name: '이**', region: '서울', birth: '72' }
+  const f = buildManualTask(lee, '문진예정', '2026-10-16', '2-2', 'r9')
+  expect(f).toEqual({ patient_id: 'p2', prescription_id: 'r9', kind: '문진예정', label: '이**(72) 2-2 문진예정', due_on: '2026-10-16', status: '예정', attempt: 0, note: '' })
+  expect(buildManualTask(lee, '재연락', '2026-10-16', ' 2-2 ', null).label).toBe('이**(72) 2-2 재연락')
+  expect(buildManualTask(kim, '확인전화', '2026-10-16', '', null).label).toBe('김** 확인전화')
+  expect(MANUAL_LABEL.재연락).toBe('다시 연락하기')
 })

@@ -10,7 +10,7 @@ import {
   upsertReservations, updateReservation, deleteReservation,
 } from './supabase'
 import { parseReservations, classifyType, RESV_KEYWORDS_DEFAULT } from './reservations'
-import { buildTasksForPrescription, saturdayWarning } from './schedule'
+import { buildManualTask, buildTasksForPrescription, MANUAL_LABEL, saturdayWarning, type ManualKind } from './schedule'
 import { buildRecontact, buildWaitRevival } from './recontact'
 import { isClinicClosed, isHoliday, holidayName, dow } from './holidays'
 import { addDays, monFirstBlanks } from './dates'
@@ -760,6 +760,7 @@ function openDayModal(ds: string): void {
          <input id="m-birth" style="width:100px" placeholder="생년(동명이인만)">
          <input id="m-num" style="width:70px" placeholder="번호">
          <button class="btn primary" data-action="rxSmart">처방 나감</button>
+         ${(['문진예정', '재연락', '확인전화'] as ManualKind[]).map((k) => `<button class="btn" data-action="manualTask" data-kind="${k}">${MANUAL_LABEL[k]}</button>`).join('')}
        </div>
        <div class="row" style="margin-top:6px">
          <span class="muted">새 환자·새 결제일 때만 →</span>
@@ -772,7 +773,7 @@ function openDayModal(ds: string): void {
          <input id="m-memo" placeholder="한 줄 메모 (예: 오후 휴가·택배 지연)" style="width:240px">
          <button class="btn" data-action="saveMemo" data-date="${ds}">메모 저장</button>
        </div>
-       <p class="muted" style="margin-top:6px">이름을 치면 기존 환자가 자동완성됩니다. 이어서 처방하면 다음 번호로, 약을 다 먹은 환자는 개월수를 골라 새 결제(4-1 등)로 이어집니다. 없는 이름은 새 환자로 등록됩니다. 번호는 자동으로 채워지고 고칠 수 있습니다.</p>`
+       <p class="muted" style="margin-top:6px">이름을 치면 기존 환자가 자동완성됩니다. 이어서 처방하면 다음 번호로, 약을 다 먹은 환자는 개월수를 골라 새 결제(4-1 등)로 이어집니다. 없는 이름은 새 환자로 등록됩니다. 번호는 자동으로 채워지고 고칠 수 있습니다. [문진예정]·[다시 연락하기]·[확인전화]는 처방 없이 그 일정 하나만 이 날에 넣어요(등록된 환자만, 번호 칸 그대로).</p>`
   modal.className = 'open'
   modal.innerHTML = `<div class="modal-box"><h3>${ds} — ${blocked ? '메모' : '처방 입력'}</h3>${topSection}${dayList}</div>`
   if (!blocked) {
@@ -1029,6 +1030,20 @@ async function handleClick(e: Event): Promise<void> {
     closeModal(); await reload(); return
   }
 
+  if (action === 'manualTask') {
+    const kind = el.dataset.kind as ManualKind
+    const name = (document.getElementById('m-name') as HTMLInputElement).value.trim()
+    if (!name) { alert('환자 이름을 입력하세요.'); return }
+    const birth = (document.getElementById('m-birth') as HTMLInputElement).value.trim()
+    const disp = birth ? `${name}(${birth})` : name
+    const p = state.patients.find((x) => displayName(x) === disp)
+    if (!p) { alert('등록된 환자만 넣을 수 있어요. 자동완성에서 고르거나, 새 환자면 먼저 [처방 나감]으로 등록하세요.'); return }
+    if (isClinicClosed(state.pickDate, state.settings) && !confirm(`${state.pickDate}은 휴진일이에요. 그래도 ${MANUAL_LABEL[kind]}을(를) 넣을까요?`)) return
+    const numField = (document.getElementById('m-num') as HTMLInputElement).value.trim()
+    const rxs = state.prescriptions.filter((r) => r.patient_id === p.id)
+    await insertTasks([buildManualTask(p, kind, state.pickDate, numField, rxs.length ? rxs[rxs.length - 1].id : null)])
+    closeModal(); await reload(); return
+  }
   if (action === 'addPatient') {
     const name = (document.getElementById('np-name') as HTMLInputElement).value.trim()
     if (!name) { alert('이름을 입력하세요'); return }

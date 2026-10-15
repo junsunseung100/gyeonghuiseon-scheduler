@@ -51,6 +51,17 @@ export function buildTasksForPrescription(p: Patient, rx: Prescription, x: numbe
   return tasks
 }
 
+// 날짜 팝업에서 처방 없이 한 가지 일정만 손으로 넣기(간호사 요청 2026-10-15).
+// 번호는 팝업 번호 칸 그대로. 「다시 연락하기」는 재연락 — 이후 연락 안 됨 흐름(3일→10일)이 그대로 이어진다.
+export type ManualKind = '문진예정' | '재연락' | '확인전화'
+export const MANUAL_LABEL: Record<ManualKind, string> = { 문진예정: '문진예정', 재연락: '다시 연락하기', 확인전화: '확인전화' }
+
+export function buildManualTask(p: Patient, kind: ManualKind, date: string, number: string, rxId: string | null): NewTask {
+  const dname = p.birth ? `${p.name}(${p.birth})` : p.name
+  const tag = number.trim() ? `${dname} ${number.trim()}` : dname
+  return { patient_id: p.id, prescription_id: rxId, kind, label: `${tag} ${kind}`, due_on: date, status: '예정', attempt: 0, note: '' }
+}
+
 export function saturdayWarning(p: Patient, prescribedOn: string): string | null {
   if (dow(prescribedOn) === 6 && (p.region === '지방' || p.region === '해외')) {
     return '토요일 지방/해외 처방 — 주말 배송 중단 주의(꼭 그날 요청이면 진행)'
