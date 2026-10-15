@@ -776,7 +776,7 @@ function openDayModal(ds: string): void {
        </div>
        <p class="muted" style="margin-top:6px">이름을 치면 기존 환자가 자동완성됩니다. 이어서 처방하면 다음 번호로, 약을 다 먹은 환자는 개월수를 골라 새 결제(4-1 등)로 이어집니다. 없는 이름은 새 환자로 등록됩니다. 번호는 자동으로 채워지고 고칠 수 있습니다. [문진예정]·[다시 연락하기]·[확인전화]는 처방 없이 그 일정 하나만 이 날에 넣어요(등록된 환자만, 번호 칸 그대로).</p>`
   modal.className = 'open'
-  modal.innerHTML = `<div class="modal-box"><h3>${ds} — ${blocked ? '메모' : '처방 입력'}</h3>${topSection}${dayList}</div>`
+  modal.innerHTML = `<div class="modal-box"><div class="modal-top"><h3>${ds} — ${blocked ? '메모' : '처방 입력'}${dayTasks.length ? ` <span class="muted" style="font-size:13px;font-weight:400">· 이 날 ${dayTasks.length}건</span>` : ''}</h3>${topSection}</div>${dayList}</div>`
   if (!blocked) {
     // 번호 자동완성
     const nameEl = document.getElementById('m-name') as HTMLInputElement

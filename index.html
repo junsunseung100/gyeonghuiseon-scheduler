@@ -108,7 +108,9 @@
       /* ---- 모달 ---- */
       #modal{ position:fixed; inset:0; background:rgba(16,32,50,.4); display:none; align-items:center; justify-content:center; z-index:80; }
       #modal.open{ display:flex; }
-      .modal-box{ background:#fff; border-radius:16px; padding:18px; width:380px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,.2); }
+      .modal-box{ background:#fff; border-radius:16px; padding:18px; width:560px; max-width:94vw; max-height:92vh; overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,.2); }
+      /* 하루 30제까지: 일정이 많아도 위 입력칸은 붙어 있고 아래 목록만 스크롤 */
+      .modal-top{ position:sticky; top:-18px; background:#fff; z-index:2; padding-top:2px; padding-bottom:6px; }
       .modal-box h3{ margin:0 0 10px; }
 
       /* ---- 대시보드 ---- */
